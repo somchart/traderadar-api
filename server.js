@@ -171,27 +171,44 @@ function toStooqSym(sym) {
   if (sym === '^GSPC')     return '^SPX';
   if (sym === '^IXIC')     return '^NDX';
   if (sym === '^VIX')      return '^VIX';
-  if (sym === '^SET')      return 'STI.IN'; // approximate
+  if (sym === '^SET')      return 'WIG.IN';  // fallback index
   if (sym === 'THBX=X')   return 'USDTHB.FX';
+  if (sym === 'DX-Y.NYB') return 'USDX.FX';
+  if (sym === '^TNX')      return 'TNX.US';
+  if (sym === 'SPY')       return 'SPY.US';
+  if (sym === 'QQQ')       return 'QQQ.US';
+  if (sym === 'GLD')       return 'GLD.US';
   if (sym.endsWith('.BK')) return sym.replace('.BK', '.TH');
-  // US stocks: add .US suffix
+  // US stocks/ETFs: add .US suffix
   if (/^[A-Z]{1,5}$/.test(sym)) return sym + '.US';
   return sym;
 }
 
+async function fetchStooqCSV(stSym) {
+  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stSym.toLowerCase())}&i=d`;
+  const body = await fetchURL(url, {
+    'Accept': 'text/csv, text/plain, */*',
+    'Referer': 'https://stooq.com/',
+  }, 10000);
+  const text = typeof body === 'string' ? body : JSON.stringify(body);
+  // Stooq returns HTML on error ("Oops", "No data")
+  if (text.startsWith('<') || text.toLowerCase().includes('oops') || text.toLowerCase().includes('no data')) {
+    throw new Error(`Stooq: no data for ${stSym} (got HTML error page)`);
+  }
+  const lines = text.trim().split('\n').filter(l => l.trim() && !l.toLowerCase().startsWith('date'));
+  if (!lines.length) throw new Error(`Stooq: empty CSV for ${stSym}`);
+  return lines;
+}
+
 async function stooqQuote(sym) {
   const stSym = toStooqSym(sym);
-  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stSym)}&i=d`;
-  const csv = await fetchURL(url, { 'Accept': 'text/csv,text/plain,*/*' }, 8000);
-  if (typeof csv !== 'string') throw new Error('Stooq: non-text response');
-  const lines = csv.trim().split('\n').filter(l => l.trim() && !l.startsWith('Date'));
-  if (!lines.length) throw new Error(`Stooq: no data for ${stSym}`);
-  // CSV format: Date,Open,High,Low,Close,Volume
-  const parts  = lines[lines.length-1].split(',');
-  const [date, open, high, low, close, vol] = parts;
+  const lines = await fetchStooqCSV(stSym);
+  // CSV: Date,Open,High,Low,Close,Volume
+  const last   = lines[lines.length - 1].split(',');
   const prev   = lines.length > 1 ? parseFloat(lines[lines.length-2].split(',')[4]) : null;
-  const c      = parseFloat(close);
-  const p      = prev || c;
+  const [date, open, high, low, close, vol] = last;
+  const c = parseFloat(close);
+  const p = prev || c;
   if (isNaN(c)) throw new Error(`Stooq: invalid price "${close}" for ${stSym}`);
   return {
     symbol:                     sym,
@@ -201,8 +218,8 @@ async function stooqQuote(sym) {
     regularMarketChangePercent: safeNum(p ? ((c-p)/p)*100 : 0, 4),
     regularMarketVolume:        vol ? parseInt(vol) : null,
     averageVolume:              null,
-    fiftyTwoWeekHigh:           safeNum(Math.max(c, parseFloat(high)), 4),
-    fiftyTwoWeekLow:            safeNum(Math.min(c, parseFloat(low)), 4),
+    fiftyTwoWeekHigh:           safeNum(high, 4),
+    fiftyTwoWeekLow:            safeNum(low, 4),
     fiftyDayAverage:            null,
     twoHundredDayAverage:       null,
     trailingPE:                 null,
@@ -211,40 +228,41 @@ async function stooqQuote(sym) {
     regularMarketDayHigh:       safeNum(high, 4),
     regularMarketDayLow:        safeNum(low, 4),
     regularMarketPreviousClose: safeNum(p, 4),
+    currency:                   sym.endsWith('.BK') || sym.endsWith('.TH') ? 'THB' : 'USD',
     _source: 'stooq',
-    _date: date,
+    _date: date?.trim(),
   };
 }
 
 // ── Stooq historical CSV for spark chart ─────────────────────────────────────
 async function stooqChart(sym, days=1) {
   const stSym = toStooqSym(sym);
-  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stSym)}&i=d`;
-  const csv = await fetchURL(url, { 'Accept': 'text/csv,text/plain,*/*' }, 8000);
-  if (typeof csv !== 'string') throw new Error('Stooq chart: non-text response');
-  const lines = csv.trim().split('\n').filter(l=>l.trim()&&!l.startsWith('Date'));
-  if (!lines.length) throw new Error(`Stooq: no chart data for ${stSym}`);
+  const lines = await fetchStooqCSV(stSym);
 
   const take = Math.min(lines.length, Math.max(days * 2, 30));
   const rows = lines.slice(-take).map(l => {
-    const [date,open,high,low,close,vol] = l.split(',');
+    const [date, open, high, low, close, vol] = l.split(',');
     return {
-      ts:     Math.floor(new Date(date).getTime()/1000),
-      open:   safeNum(open,4), high: safeNum(high,4),
-      low:    safeNum(low,4),  close: safeNum(close,4),
+      ts:     Math.floor(new Date(date?.trim()).getTime() / 1000),
+      open:   safeNum(open, 4),
+      high:   safeNum(high, 4),
+      low:    safeNum(low, 4),
+      close:  safeNum(close, 4),
       volume: vol ? parseInt(vol) : null,
     };
-  }).filter(r => r.close != null);
+  }).filter(r => r.close != null && !isNaN(r.ts));
+
+  if (!rows.length) throw new Error(`Stooq chart: no valid rows for ${stSym}`);
 
   return {
-    timestamps: rows.map(r=>r.ts),
-    closes:     rows.map(r=>r.close),
-    opens:      rows.map(r=>r.open),
-    highs:      rows.map(r=>r.high),
-    lows:       rows.map(r=>r.low),
-    volumes:    rows.map(r=>r.volume),
+    timestamps: rows.map(r => r.ts),
+    closes:     rows.map(r => r.close),
+    opens:      rows.map(r => r.open),
+    highs:      rows.map(r => r.high),
+    lows:       rows.map(r => r.low),
+    volumes:    rows.map(r => r.volume),
     count:      rows.length,
-    _source: 'stooq',
+    _source:    'stooq',
   };
 }
 
