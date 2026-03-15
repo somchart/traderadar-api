@@ -1,0 +1,2104 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeRadar Pro — Professional Trading Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#04080e; --s1:#080f1a; --s2:#0c1624; --s3:#10202e;
+  --b1:#182840; --b2:#1f3354; --b3:#243d62;
+  --cyan:#00d4ff; --green:#00e87a; --red:#ff3355;
+  --gold:#ffc840; --purple:#a855f7; --orange:#ff7a1a;
+  --text:#ddeeff; --t2:#8aaac8; --t3:#4a6a88;
+  --mono:'JetBrains Mono',monospace; --sans:'Sarabun',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;overflow-x:hidden;}
+
+/* BACKGROUND */
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(ellipse 80% 50% at 20% 0%,rgba(0,212,255,0.04) 0%,transparent 60%),
+             radial-gradient(ellipse 60% 40% at 80% 100%,rgba(0,232,122,0.03) 0%,transparent 60%),
+             linear-gradient(rgba(0,212,255,0.018)1px,transparent 1px),
+             linear-gradient(90deg,rgba(0,212,255,0.018)1px,transparent 1px);
+  background-size:100%,100%,36px 36px,36px 36px;}
+
+.z1{position:relative;z-index:1;}
+
+/* ===== LAYOUT ===== */
+header{background:rgba(4,8,14,0.96);border-bottom:1px solid var(--b1);position:sticky;top:0;z-index:500;backdrop-filter:blur(20px);}
+.hdr{max-width:1600px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.logo{font-family:var(--mono);font-size:1rem;font-weight:700;color:var(--cyan);letter-spacing:.06em;display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.live-pulse{width:7px;height:7px;background:var(--green);border-radius:50%;animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(0,232,122,.5);}50%{box-shadow:0 0 0 5px rgba(0,232,122,0);}}
+
+/* SEARCH */
+.sw{position:relative;flex:1;max-width:400px;}
+.si{width:100%;background:var(--s2);border:1px solid var(--b1);color:var(--text);font-family:var(--mono);font-size:.78rem;padding:7px 34px 7px 12px;border-radius:5px;outline:none;transition:border-color .2s,box-shadow .2s;letter-spacing:.03em;}
+.si:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(0,212,255,.1);}
+.si::placeholder{color:var(--t3);}
+.s-ico{position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--t3);font-size:.9rem;pointer-events:none;}
+.s-spin{position:absolute;right:10px;top:50%;width:13px;height:13px;border:2px solid var(--b2);border-top-color:var(--cyan);border-radius:50%;animation:sp .7s linear infinite;display:none;}
+@keyframes sp{to{transform:translateY(-50%) rotate(360deg)}}
+.sdd{position:absolute;top:calc(100% + 5px);left:0;right:0;background:var(--s1);border:1px solid var(--b2);border-radius:7px;z-index:600;box-shadow:0 20px 60px rgba(0,0,0,.8);display:none;max-height:360px;overflow-y:auto;}
+.sdd.open{display:block;}
+.dd-sec{font-family:var(--mono);font-size:.6rem;color:var(--t3);padding:7px 12px 3px;letter-spacing:.1em;text-transform:uppercase;}
+.dd-row{display:flex;align-items:center;gap:9px;padding:8px 12px;cursor:pointer;border-bottom:1px solid rgba(24,40,64,.4);transition:background .1s;}
+.dd-row:hover{background:rgba(0,212,255,.05);}
+.dd-tk{font-family:var(--mono);font-weight:600;font-size:.79rem;color:var(--cyan);min-width:75px;}
+.dd-nm{font-size:.75rem;color:var(--text);flex:1;}
+.dd-tp{font-family:var(--mono);font-size:.6rem;padding:2px 6px;border-radius:3px;background:rgba(0,212,255,.07);color:var(--t3);border:1px solid var(--b1);white-space:nowrap;}
+.dd-pr{font-family:var(--mono);font-size:.73rem;font-weight:600;white-space:nowrap;}
+.dd-empty{padding:14px;text-align:center;font-family:var(--mono);font-size:.76rem;color:var(--t3);}
+
+/* HEADER RIGHT */
+.hdr-r{display:flex;align-items:center;gap:10px;flex-shrink:0;margin-left:auto;}
+.htime{font-family:var(--mono);font-size:.7rem;color:var(--t3);}
+.htime span{color:var(--cyan);}
+.rbtn{background:var(--s2);border:1px solid var(--b1);color:var(--cyan);font-family:var(--mono);font-size:.7rem;padding:6px 13px;cursor:pointer;border-radius:4px;transition:all .2s;letter-spacing:.05em;}
+.rbtn:hover{background:var(--cyan);color:var(--bg);}
+.rbtn.loading{opacity:.45;pointer-events:none;}
+
+/* API STATUS */
+.abar{max-width:1600px;margin:0 auto;padding:5px 20px;display:flex;gap:16px;align-items:center;font-family:var(--mono);font-size:.65rem;color:var(--t3);flex-wrap:wrap;border-top:1px solid rgba(24,40,64,.4);}
+.adot{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle;transition:background .3s;}
+.ok{background:var(--green);} .warn{background:var(--gold);} .err{background:var(--red);}
+
+/* WRAPPER */
+.wrap{max-width:1600px;margin:0 auto;padding:0 20px;}
+
+/* MARKET TICKER */
+.mbar{display:flex;gap:8px;overflow-x:auto;padding:12px 0;margin-bottom:16px;scrollbar-width:none;}
+.mpill{flex-shrink:0;background:var(--s1);border:1px solid var(--b1);border-radius:6px;padding:8px 13px;display:flex;align-items:center;gap:10px;min-width:142px;cursor:pointer;transition:border-color .2s;}
+.mpill:hover{border-color:var(--b3);}
+.mname{font-size:.68rem;color:var(--t3);font-family:var(--mono);}
+.mval{font-family:var(--mono);font-size:.86rem;font-weight:600;}
+.mchg{font-family:var(--mono);font-size:.68rem;padding:2px 6px;border-radius:3px;white-space:nowrap;}
+.u{color:var(--green);} .d{color:var(--red);}
+.bu{background:rgba(0,232,122,.12);color:var(--green);}
+.bd{background:rgba(255,51,85,.12);color:var(--red);}
+.bn{background:rgba(0,212,255,.09);color:var(--cyan);}
+
+/* TABS */
+.tabs{display:flex;gap:2px;padding:14px 0 0;border-bottom:1px solid var(--b1);margin-bottom:18px;overflow-x:auto;scrollbar-width:none;}
+.tab{padding:7px 16px;font-family:var(--mono);font-size:.72rem;color:var(--t3);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;}
+.tab.active{color:var(--cyan);border-bottom-color:var(--cyan);}
+.tab:hover:not(.active){color:var(--text);}
+
+/* GRID */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
+.g4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
+.gfull{margin-bottom:14px;}
+@media(max-width:1100px){.g3{grid-template-columns:1fr 1fr;} .g4{grid-template-columns:1fr 1fr;}}
+@media(max-width:700px){.g2,.g3,.g4{grid-template-columns:1fr;}}
+
+/* CARD */
+.card{background:var(--s1);border:1px solid var(--b1);border-radius:7px;overflow:hidden;}
+.ch{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--b1);}
+.ct{font-family:var(--mono);font-size:.7rem;color:var(--t2);letter-spacing:.08em;text-transform:uppercase;}
+.cbadge{font-family:var(--mono);font-size:.62rem;padding:2px 8px;border-radius:3px;background:rgba(0,212,255,.08);color:var(--cyan);border:1px solid rgba(0,212,255,.2);}
+.cbadge.green{background:rgba(0,232,122,.08);color:var(--green);border-color:rgba(0,232,122,.2);}
+.cbadge.red{background:rgba(255,51,85,.08);color:var(--red);border-color:rgba(255,51,85,.2);}
+.cbadge.gold{background:rgba(255,200,64,.08);color:var(--gold);border-color:rgba(255,200,64,.2);}
+
+/* WATCHLIST CARDS */
+.wlarea{padding-top:4px;}
+.wlcard{background:var(--s2);border:1px solid var(--cyan);border-radius:8px;padding:14px 16px;margin-bottom:12px;animation:fadeIn .3s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.wltop{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;}
+.wlticker{font-family:var(--mono);font-size:1.1rem;font-weight:700;color:var(--cyan);}
+.wlsub{font-size:.74rem;color:var(--t3);margin-top:2px;}
+.wlactions{display:flex;gap:7px;}
+.wlbtn{font-family:var(--mono);font-size:.65rem;padding:4px 11px;border-radius:4px;cursor:pointer;transition:all .15s;border:1px solid var(--b2);background:transparent;color:var(--t2);}
+.wlbtn.ai{border-color:rgba(0,212,255,.3);color:var(--cyan);background:rgba(0,212,255,.07);}
+.wlbtn.ai:hover{background:var(--cyan);color:var(--bg);}
+.wlbtn.cls:hover{border-color:var(--red);color:var(--red);}
+.wlg{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin-bottom:10px;}
+@media(max-width:900px){.wlg{grid-template-columns:repeat(3,1fr);}}
+.wls{background:var(--s1);border-radius:5px;padding:9px 11px;}
+.wlsl{font-family:var(--mono);font-size:.6rem;color:var(--t3);margin-bottom:3px;}
+.wlsv{font-family:var(--mono);font-size:.87rem;font-weight:600;}
+.wltech{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px;}
+@media(max-width:900px){.wltech{grid-template-columns:repeat(2,1fr);}}
+.wltcard{background:var(--s3);border-radius:5px;padding:9px 11px;border-left:3px solid var(--b2);}
+.wltcard.bull{border-left-color:var(--green);}
+.wltcard.bear{border-left-color:var(--red);}
+.wltcard.neutral{border-left-color:var(--gold);}
+.wtlabel{font-family:var(--mono);font-size:.59rem;color:var(--t3);margin-bottom:3px;}
+.wtval{font-family:var(--mono);font-size:.82rem;font-weight:600;}
+.wtsig{font-family:var(--mono);font-size:.59rem;margin-top:2px;}
+.wlfoot{display:flex;align-items:center;justify-content:space-between;}
+.wlsrc{font-family:var(--mono);font-size:.6rem;color:var(--t3);}
+
+/* CHART */
+.chart-wrap{padding:6px 16px 12px;position:relative;}
+.chart-wrap canvas{display:block;width:100%;height:auto;}
+.chart-label{position:absolute;top:10px;right:20px;font-family:var(--mono);font-size:.6rem;color:var(--t3);}
+
+/* STOCK TABLE */
+.stbl{width:100%;}
+.srow{display:grid;grid-template-columns:85px 1fr 105px 85px 80px 65px 70px;align-items:center;padding:9px 16px;border-bottom:1px solid rgba(24,40,64,.4);transition:background .1s;cursor:pointer;}
+.srow:last-child{border-bottom:none;}
+.srow:hover{background:rgba(0,212,255,.04);}
+.srow.hdr{opacity:.4;font-size:.64rem;font-family:var(--mono);letter-spacing:.06em;cursor:default;}
+.stk{font-family:var(--mono);font-weight:700;font-size:.8rem;color:var(--cyan);}
+.snm{font-size:.76rem;color:var(--text);}
+.ssc{font-size:.62rem;color:var(--t3);font-family:var(--mono);}
+.spr{font-family:var(--mono);font-weight:600;font-size:.83rem;text-align:right;}
+.sch{font-family:var(--mono);font-size:.75rem;text-align:right;}
+.srs{font-family:var(--mono);font-size:.59rem;padding:2px 6px;border-radius:3px;text-align:center;letter-spacing:.03em;font-weight:700;}
+.sBUY{background:rgba(0,232,122,.14);color:var(--green);border:1px solid rgba(0,232,122,.24);}
+.sSELL{background:rgba(255,51,85,.14);color:var(--red);border:1px solid rgba(255,51,85,.24);}
+.sHOLD{background:rgba(255,200,64,.13);color:var(--gold);border:1px solid rgba(255,200,64,.2);}
+.sWATCH{background:rgba(168,85,247,.12);color:var(--purple);border:1px solid rgba(168,85,247,.2);}
+.sWAIT{background:rgba(74,106,136,.18);color:var(--t2);border:1px solid var(--b1);}
+
+/* RSI GAUGE */
+.rsi-bar{width:100%;height:4px;background:linear-gradient(90deg,var(--green) 0%,var(--gold) 35%,var(--gold) 65%,var(--red) 100%);border-radius:2px;position:relative;margin:3px 0;}
+.rsi-ptr{position:absolute;top:-3px;width:3px;height:10px;background:white;border-radius:1px;transform:translateX(-50%);transition:left .5s ease;}
+
+/* INDICATOR PANELS */
+.indrow{display:flex;gap:12px;padding:10px 16px;flex-wrap:wrap;border-bottom:1px solid var(--b1);}
+.indchip{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:.68rem;}
+.indlbl{color:var(--t3);}
+.indval{font-weight:600;}
+
+/* MINI INDICATORS GRID */
+.ig4{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--b1);}
+.igcell{background:var(--s1);padding:13px 14px;}
+.iglbl{font-family:var(--mono);font-size:.6rem;color:var(--t3);margin-bottom:4px;letter-spacing:.06em;}
+.igval{font-family:var(--mono);font-size:1.05rem;font-weight:700;}
+.igsub{font-family:var(--mono);font-size:.62rem;margin-top:2px;}
+
+/* HEATMAP */
+.heatmap{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;padding:12px;}
+.hcell{border-radius:5px;padding:10px 8px;text-align:center;cursor:pointer;transition:opacity .15s;}
+.hcell:hover{opacity:.8;}
+.hcname{font-family:var(--mono);font-size:.65rem;color:rgba(255,255,255,.7);}
+.hcval{font-family:var(--mono);font-size:.82rem;font-weight:700;color:white;margin-top:2px;}
+
+/* SIGNAL METER */
+.sigbar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--b1);}
+.sigmeter{flex:1;height:8px;background:var(--s3);border-radius:4px;overflow:hidden;position:relative;}
+.sigfill{height:100%;border-radius:4px;transition:width .8s ease,background .5s ease;}
+.siglabel{font-family:var(--mono);font-size:.65rem;color:var(--t3);white-space:nowrap;}
+.sigval{font-family:var(--mono);font-size:.7rem;font-weight:700;white-space:nowrap;min-width:80px;text-align:right;}
+
+/* FEAR GREED */
+.fgwrap{display:flex;flex-direction:column;align-items:center;padding:16px;}
+.fgnum{font-family:var(--mono);font-size:2.2rem;font-weight:700;line-height:1;}
+.fglbl{font-family:var(--mono);font-size:.7rem;color:var(--t3);margin-top:4px;}
+.fgbar{width:100%;height:10px;background:linear-gradient(90deg,#ff1a40,#ff7a1a,#ffc840,#a8e040,#00e87a);border-radius:5px;margin:12px 0;position:relative;}
+.fgndl{position:absolute;top:-4px;width:5px;height:18px;background:white;border-radius:2px;transform:translateX(-50%);box-shadow:0 0 6px rgba(0,0,0,.5);transition:left 1s ease;}
+.fgscale{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.58rem;color:var(--t3);}
+
+/* AI PANEL */
+.aibody{padding:14px;min-height:90px;}
+.aiload{display:flex;align-items:center;gap:9px;color:var(--t3);font-size:.77rem;font-family:var(--mono);padding:12px 0;}
+.aispin{width:13px;height:13px;border:2px solid var(--b2);border-top-color:var(--cyan);border-radius:50%;animation:sp2 .7s linear infinite;flex-shrink:0;}
+@keyframes sp2{to{transform:rotate(360deg)}}
+.aitxt{font-size:.82rem;line-height:1.78;color:var(--text);}
+.aifoot{display:flex;gap:8px;padding:11px 16px;border-top:1px solid var(--b1);}
+.aiinp{flex:1;background:var(--s2);border:1px solid var(--b1);color:var(--text);font-family:var(--sans);font-size:.8rem;padding:8px 12px;border-radius:4px;outline:none;transition:border-color .2s;}
+.aiinp:focus{border-color:var(--cyan);}
+.aiinp::placeholder{color:var(--t3);}
+.aibtn{background:var(--cyan);color:var(--bg);border:none;font-family:var(--mono);font-size:.68rem;font-weight:700;padding:8px 16px;border-radius:4px;cursor:pointer;letter-spacing:.04em;white-space:nowrap;transition:opacity .2s;}
+.aibtn:hover{opacity:.85;} .aibtn:disabled{opacity:.35;pointer-events:none;}
+.symrow{display:flex;gap:6px;padding:10px 16px;flex-wrap:wrap;border-bottom:1px solid var(--b1);}
+.symbtn{font-family:var(--mono);font-size:.66rem;padding:4px 9px;border-radius:3px;border:1px solid var(--b1);background:transparent;color:var(--t3);cursor:pointer;transition:all .14s;}
+.symbtn:hover,.symbtn.active{background:rgba(0,212,255,.09);border-color:var(--cyan);color:var(--cyan);}
+
+/* TAB CONTENT */
+.tbc{display:none;} .tbc.active{display:block;}
+
+/* MISC */
+.ldrow{padding:16px;font-family:var(--mono);font-size:.72rem;color:var(--t3);text-align:center;}
+.errmsg{font-family:var(--mono);font-size:.72rem;color:var(--red);padding:10px 14px;background:rgba(255,51,85,.07);border-radius:4px;border:1px solid rgba(255,51,85,.2);margin:8px 0;}
+.live-dot{display:inline-block;width:5px;height:5px;background:var(--green);border-radius:50%;margin-right:5px;animation:pulse 1.5s infinite;vertical-align:middle;}
+.tag{font-family:var(--mono);font-size:.6rem;padding:2px 6px;border-radius:3px;background:var(--s3);border:1px solid var(--b1);color:var(--t3);}
+
+/* CONNECTIVITY TEST */
+.conn-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;}
+.conn-row{display:flex;align-items:center;justify-content:space-between;background:var(--s2);border-radius:5px;padding:8px 12px;}
+.conn-name{font-family:var(--mono);font-size:.7rem;color:var(--t2);}
+.conn-status{font-family:var(--mono);font-size:.66rem;display:flex;align-items:center;gap:5px;}
+.conn-lat{font-family:var(--mono);font-size:.62rem;color:var(--t3);}
+
+/* TOOLTIP */
+[title]{cursor:help;}
+
+/* SCROLLBAR */
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<header>
+<div class="hdr z1">
+  <div class="logo"><div class="live-pulse"></div>TradeRadar<span style="color:var(--t3);font-size:.7rem;font-weight:300"> PRO</span></div>
+
+  <!-- SEARCH -->
+  <div class="sw" id="swrap">
+    <input id="si" class="si" placeholder="🔍  ค้นหา: AAPL · PTT.BK · GC=F · BTC-USD" autocomplete="off" spellcheck="false"/>
+    <span class="s-ico" id="sico">⌕</span>
+    <div class="s-spin" id="ssp"></div>
+    <div class="sdd" id="sdd"></div>
+  </div>
+
+  <div class="hdr-r">
+    <div class="htime">TH: <span id="clk-th">—</span> | NY: <span id="clk-ny">—</span></div>
+    <button class="rbtn" id="rbtn" onclick="refreshAll()">↻ รีเฟรช</button>
+    <button class="rbtn" onclick="switchTab(null,'conn')" style="color:var(--t2)">⚡ API</button>
+  </div>
+</div>
+
+<div class="abar z1" id="abar">
+  <span><span class="adot warn" id="dot-yf" title="Yahoo Finance"></span>Yahoo Finance</span>
+  <span><span class="adot warn" id="dot-sp" title="Yahoo Spark"></span>Spark API</span>
+  <span><span class="adot warn" id="dot-fg" title="Alternative.me F&G"></span>Fear&amp;Greed</span>
+  <span><span class="adot warn" id="dot-fx" title="Frankfurter FX"></span>FX Rate</span>
+  <span><span class="adot warn" id="dot-ai" title="Claude AI"></span>Claude AI</span>
+  <span id="abar-time" style="margin-left:auto;color:rgba(74,106,136,.5)">อัปเดต: —</span>
+</div>
+</header>
+
+<div class="wrap z1">
+
+<!-- WATCHLIST AREA -->
+<div class="wlarea" id="wlarea"></div>
+
+<!-- MARKET TICKER BAR -->
+<div class="mbar" id="mbar">
+  <div class="mpill" onclick="openAnalyze('^SET','SET')"><div><div class="mname">SET</div><div class="mval" id="mv-set">—</div></div><div class="mchg bn" id="mc-set">—</div></div>
+  <div class="mpill" onclick="openAnalyze('^GSPC','S&P500')"><div><div class="mname">S&amp;P 500</div><div class="mval" id="mv-sp">—</div></div><div class="mchg bn" id="mc-sp">—</div></div>
+  <div class="mpill" onclick="openAnalyze('^IXIC','NASDAQ')"><div><div class="mname">NASDAQ</div><div class="mval" id="mv-nq">—</div></div><div class="mchg bn" id="mc-nq">—</div></div>
+  <div class="mpill" onclick="openAnalyze('GC=F','GOLD')"><div><div class="mname">GOLD USD</div><div class="mval" id="mv-gold">—</div></div><div class="mchg bn" id="mc-gold">—</div></div>
+  <div class="mpill" onclick="openAnalyze('THBX=X','USD/THB')"><div><div class="mname">USD/THB</div><div class="mval" id="mv-thb">—</div></div><div class="mchg bn" id="mc-thb">—</div></div>
+  <div class="mpill" onclick="openAnalyze('BTC-USD','Bitcoin')"><div><div class="mname">BTC/USD</div><div class="mval" id="mv-btc">—</div></div><div class="mchg bn" id="mc-btc">—</div></div>
+  <div class="mpill" onclick="openAnalyze('^VIX','VIX')"><div><div class="mname">VIX</div><div class="mval" id="mv-vix">—</div></div><div class="mchg bn" id="mc-vix">—</div></div>
+  <div class="mpill"><div><div class="mname">10Y YIELD</div><div class="mval" id="mv-tnx">—</div></div><div class="mchg bn" id="mc-tnx">—</div></div>
+</div>
+
+<!-- TABS -->
+<div class="tabs">
+  <div class="tab active" data-tab="overview" onclick="switchTab(this,'overview')">📊 ภาพรวม</div>
+  <div class="tab" data-tab="thai" onclick="switchTab(this,'thai')">🇹🇭 หุ้นไทย</div>
+  <div class="tab" data-tab="global" onclick="switchTab(this,'global')">🌍 ต่างประเทศ</div>
+  <div class="tab" data-tab="gold" onclick="switchTab(this,'gold')">🥇 ทองคำ</div>
+  <div class="tab" data-tab="technical" onclick="switchTab(this,'technical')">📈 Technical</div>
+  <div class="tab" data-tab="ai" onclick="switchTab(this,'ai')">🤖 AI วิเคราะห์</div>
+  <div class="tab" data-tab="conn" onclick="switchTab(this,'conn')">⚡ Connectivity</div>
+</div>
+
+<!-- ===== OVERVIEW TAB ===== -->
+<div id="tab-overview" class="tbc active">
+
+  <!-- Key Stats Row -->
+  <div class="g4">
+    <div class="card">
+      <div class="ch"><span class="ct">Fear &amp; Greed</span><span class="cbadge" id="fg-badge">—</span></div>
+      <div class="fgwrap">
+        <div class="fgnum" id="fg-num" style="color:var(--gold)">—</div>
+        <div class="fglbl" id="fg-lbl">กำลังโหลด...</div>
+        <div class="fgbar"><div class="fgndl" id="fg-ndl" style="left:50%"></div></div>
+        <div class="fgscale"><span>กลัวมาก</span><span>กลัว</span><span>เป็นกลาง</span><span>โลภ</span><span>โลภมาก</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch"><span class="ct">Market Indicators</span><span class="cbadge">Live</span></div>
+      <div class="ig4" style="grid-template-columns:1fr 1fr;gap:1px;background:var(--b1);">
+        <div class="igcell"><div class="iglbl">VIX</div><div class="igval" id="ig-vix">—</div><div class="igsub" id="ig-vix-sig">ความกลัว</div></div>
+        <div class="igcell"><div class="iglbl">DXY (Dollar)</div><div class="igval" id="ig-dxy">—</div><div class="igsub" id="ig-dxy-sig">—</div></div>
+        <div class="igcell"><div class="iglbl">10Y Yield</div><div class="igval" id="ig-tnx">—</div><div class="igsub" id="ig-tnx-sig">—</div></div>
+        <div class="igcell"><div class="iglbl">USD/THB</div><div class="igval" id="ig-thb">—</div><div class="igsub" id="ig-thb-sig">—</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch"><span class="ct">Market Clock</span><span class="cbadge" id="mkt-session">—</span></div>
+      <div style="padding:12px 14px;">
+        <div id="session-display" style="font-family:var(--mono);">
+          <div style="margin-bottom:8px;" id="sess-items"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch"><span class="ct">Overall Signal</span><span class="cbadge" id="ov-sig-badge">—</span></div>
+      <div style="padding:12px 14px;">
+        <div id="ov-signal-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sector Heatmap -->
+  <div class="card gfull">
+    <div class="ch"><span class="ct">Sector Heatmap — US</span><span class="cbadge">Yahoo Finance</span></div>
+    <div class="heatmap" id="heatmap">
+      <div class="ldrow" style="grid-column:1/-1;">⟳ กำลังโหลด sector...</div>
+    </div>
+  </div>
+
+  <!-- Thai + Global summary -->
+  <div class="g2">
+    <div class="card">
+      <div class="ch"><span class="ct">Top Movers — หุ้นไทย</span><span class="cbadge green"><span class="live-dot"></span>Live</span></div>
+      <div id="mover-thai"><div class="ldrow">⟳</div></div>
+    </div>
+    <div class="card">
+      <div class="ch"><span class="ct">Top Movers — US</span><span class="cbadge green"><span class="live-dot"></span>Live</span></div>
+      <div id="mover-global"><div class="ldrow">⟳</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== THAI TAB ===== -->
+<div id="tab-thai" class="tbc">
+  <div class="gfull card">
+    <div class="ch"><span class="ct">📊 หุ้นไทย SET — Technical Signals</span><span class="cbadge green"><span class="live-dot"></span>Yahoo Finance</span></div>
+    <div class="srow hdr"><span>ชื่อย่อ</span><span>บริษัท</span><span style="text-align:right">ราคา (฿)</span><span style="text-align:right">% วันนี้</span><span style="text-align:right">Volume</span><span style="text-align:center">RSI</span><span style="text-align:center">สัญญาณ</span></div>
+    <div id="list-thai"><div class="ldrow">⟳ กำลังโหลด...</div></div>
+  </div>
+</div>
+
+<!-- ===== GLOBAL TAB ===== -->
+<div id="tab-global" class="tbc">
+  <div class="gfull card">
+    <div class="ch"><span class="ct">🌍 หุ้น US / Global — Technical Signals</span><span class="cbadge"><span class="live-dot"></span>15min delay</span></div>
+    <div class="srow hdr"><span>ชื่อย่อ</span><span>บริษัท</span><span style="text-align:right">ราคา ($)</span><span style="text-align:right">% วันนี้</span><span style="text-align:right">Volume</span><span style="text-align:center">RSI</span><span style="text-align:center">สัญญาณ</span></div>
+    <div id="list-global"><div class="ldrow">⟳ กำลังโหลด...</div></div>
+  </div>
+</div>
+
+<!-- ===== GOLD TAB ===== -->
+<div id="tab-gold" class="tbc">
+  <div class="g2">
+    <div class="card">
+      <div class="ch"><span class="ct">🥇 ราคาทองคำ Real-time</span><span class="cbadge gold">XAU/USD</span></div>
+      <div class="ig4">
+        <div class="igcell"><div class="iglbl">SPOT (USD/oz)</div><div class="igval" id="g-spot">—</div><div class="igsub" id="g-spot-c">—</div></div>
+        <div class="igcell"><div class="iglbl">ทองไทย 96.5%</div><div class="igval u" id="g-th">—</div><div class="igsub">บาทละ (ประมาณ)</div></div>
+        <div class="igcell"><div class="iglbl">GLD ETF (USD)</div><div class="igval" id="g-gld">—</div><div class="igsub" id="g-gld-c">—</div></div>
+        <div class="igcell"><div class="iglbl">GC=F Futures</div><div class="igval" id="g-fut">—</div><div class="igsub" id="g-fut-c">—</div></div>
+      </div>
+      <div class="indrow">
+        <div class="indchip"><span class="indlbl">52W Hi:</span><span class="indval" id="g-hi">—</span></div>
+        <div class="indchip"><span class="indlbl">52W Lo:</span><span class="indval" id="g-lo">—</span></div>
+        <div class="indchip"><span class="indlbl">RSI(est):</span><span class="indval" id="g-rsi">—</span></div>
+        <div class="indchip"><span class="indlbl">สัญญาณ:</span><span class="indval" id="g-sig">—</span></div>
+      </div>
+      <!-- SIGNAL METER -->
+      <div class="sigbar">
+        <span class="siglabel">Bearish</span>
+        <div class="sigmeter"><div class="sigfill" id="g-sigfill" style="width:50%;background:var(--gold)"></div></div>
+        <span class="siglabel">Bullish</span>
+        <span class="sigval" id="g-sigval">—</span>
+      </div>
+      <div class="chart-wrap">
+        <div class="chart-label">Intraday (Yahoo Spark)</div>
+        <canvas id="goldChart" height="75"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch"><span class="ct">Technical Analysis — Gold</span><span class="cbadge">computed</span></div>
+      <div style="padding:12px 14px;">
+        <div id="gold-tech"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TECHNICAL TAB ===== -->
+<div id="tab-technical" class="tbc">
+  <div class="g2">
+    <div class="card">
+      <div class="ch"><span class="ct">📈 เลือก Symbol วิเคราะห์</span><span class="cbadge">Yahoo Spark</span></div>
+      <div class="symrow" id="tech-syms">
+        <button class="symbtn active" onclick="techSelect(this,'GC=F')">GOLD</button>
+        <button class="symbtn" onclick="techSelect(this,'AAPL')">AAPL</button>
+        <button class="symbtn" onclick="techSelect(this,'NVDA')">NVDA</button>
+        <button class="symbtn" onclick="techSelect(this,'TSLA')">TSLA</button>
+        <button class="symbtn" onclick="techSelect(this,'PTT.BK')">PTT</button>
+        <button class="symbtn" onclick="techSelect(this,'CPALL.BK')">CPALL</button>
+        <button class="symbtn" onclick="techSelect(this,'^SET')">SET</button>
+        <button class="symbtn" onclick="techSelect(this,'BTC-USD')">BTC</button>
+      </div>
+      <div class="chart-wrap">
+        <div class="chart-label" id="tech-chart-label">—</div>
+        <canvas id="techChart" height="120"></canvas>
+      </div>
+      <div id="tech-indicators" style="padding:0 14px 12px;"></div>
+    </div>
+    <div class="card">
+      <div class="ch"><span class="ct">Indicator Summary</span><span class="cbadge" id="tech-sig-badge">—</span></div>
+      <div id="tech-summary" style="padding:14px;"></div>
+    </div>
+  </div>
+
+  <!-- RSI Panel -->
+  <div class="g2">
+    <div class="card">
+      <div class="ch"><span class="ct">RSI(14) Dashboard</span><span class="cbadge">computed from price</span></div>
+      <div id="rsi-panel" style="padding:10px 14px;"><div class="ldrow">⟳</div></div>
+    </div>
+    <div class="card">
+      <div class="ch"><span class="ct">Volume Analysis</span><span class="cbadge">Yahoo Finance</span></div>
+      <div id="vol-panel" style="padding:10px 14px;"><div class="ldrow">⟳</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== AI TAB ===== -->
+<div id="tab-ai" class="tbc">
+  <div class="card">
+    <div class="ch"><span class="ct">🤖 AI Trading Analysis — Claude</span><span class="cbadge">claude-sonnet-4</span></div>
+    <div class="symrow" id="ai-syms">
+      <button class="symbtn active" onclick="aiSelSym(this,'PTT.BK','PTT')">PTT</button>
+      <button class="symbtn" onclick="aiSelSym(this,'CPALL.BK','CPALL')">CPALL</button>
+      <button class="symbtn" onclick="aiSelSym(this,'KBANK.BK','KBANK')">KBANK</button>
+      <button class="symbtn" onclick="aiSelSym(this,'ADVANC.BK','ADVANC')">ADVANC</button>
+      <button class="symbtn" onclick="aiSelSym(this,'AAPL','AAPL')">AAPL</button>
+      <button class="symbtn" onclick="aiSelSym(this,'NVDA','NVDA')">NVDA</button>
+      <button class="symbtn" onclick="aiSelSym(this,'TSLA','TSLA')">TSLA</button>
+      <button class="symbtn" onclick="aiSelSym(this,'GC=F','GOLD')">GOLD</button>
+      <button class="symbtn" onclick="aiSelSym(this,'BTC-USD','BTC')">BTC</button>
+      <button class="symbtn" onclick="aiSelSym(this,'^SET','SET')">SET Index</button>
+    </div>
+    <div class="aibody" id="aibody"><div style="color:var(--t3);font-family:var(--mono);font-size:.76rem;padding:8px 0">เลือก symbol ด้านบน หรือพิมพ์คำถามด้านล่าง</div></div>
+    <div class="aifoot">
+      <input class="aiinp" id="aiq" placeholder="เช่น: 'ควรซื้อ PTT ตอนนี้ไหม?', 'ทองจะขึ้นต่อหรือเปล่า?', 'ตลาด US จะเป็นยังไงต่อ?'" />
+      <button class="aibtn" id="aibtn" onclick="askAI()">ถาม →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== CONNECTIVITY TAB ===== -->
+<div id="tab-conn" class="tbc">
+
+  <!-- ── Config Card ── -->
+  <div class="card" style="margin-bottom:14px;">
+    <div class="ch">
+      <span class="ct">⚙️ ตั้งค่า Railway Backend</span>
+      <span class="cbadge" id="cfg-status-badge">ยังไม่ได้ตั้งค่า</span>
+    </div>
+    <div style="padding:14px 16px;">
+      <!-- Status banner -->
+      <div id="cfg-banner" style="display:none;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-family:var(--mono);font-size:.72rem;"></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+        <div>
+          <div style="font-family:var(--mono);font-size:.66rem;color:var(--t3);margin-bottom:5px;letter-spacing:.06em;">RAILWAY URL</div>
+          <input id="cfg-url" style="width:100%;background:var(--s2);border:1px solid var(--b1);color:var(--text);font-family:var(--mono);font-size:.75rem;padding:8px 10px;border-radius:4px;outline:none;transition:border-color .2s;"
+            placeholder="https://your-app.up.railway.app" autocomplete="off" spellcheck="false"/>
+          <div style="font-size:.65rem;color:var(--t3);margin-top:3px;">ดูได้ที่ Railway → Settings → Domains</div>
+        </div>
+        <div>
+          <div style="font-family:var(--mono);font-size:.66rem;color:var(--t3);margin-bottom:5px;letter-spacing:.06em;">API KEY</div>
+          <input id="cfg-key" type="password" style="width:100%;background:var(--s2);border:1px solid var(--b1);color:var(--text);font-family:var(--mono);font-size:.75rem;padding:8px 10px;border-radius:4px;outline:none;transition:border-color .2s;"
+            placeholder="API key ที่ตั้งใน Railway env" autocomplete="off"/>
+          <div style="font-size:.65rem;color:var(--t3);margin-top:3px;">ตั้งค่าใน Railway → Variables → API_KEY</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button class="rbtn" onclick="saveBackendConfig()" style="background:var(--cyan);color:var(--bg);border-color:var(--cyan);">💾 บันทึกและทดสอบ</button>
+        <button class="rbtn" onclick="clearBackendConfig()">🗑️ ล้างค่า</button>
+        <span id="cfg-save-msg" style="font-family:var(--mono);font-size:.68rem;color:var(--t3);"></span>
+      </div>
+      <div style="margin-top:12px;padding:10px 12px;background:var(--s3);border-radius:6px;border:1px solid var(--b1);">
+        <div style="font-family:var(--mono);font-size:.64rem;color:var(--t3);margin-bottom:4px;">📋 สถานะปัจจุบัน</div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+          <span style="font-family:var(--mono);font-size:.7rem;">URL: <span id="show-backend-url" style="color:var(--gold);">—</span></span>
+          <span style="font-family:var(--mono);font-size:.7rem;">Key: <span id="show-backend-key" style="color:var(--gold);">—</span></span>
+          <span style="font-family:var(--mono);font-size:.7rem;">Mode: <span id="show-backend-mode" style="color:var(--t3);">fallback proxy</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Test Card ── -->
+  <div class="card">
+    <div class="ch"><span class="ct">🔌 API Connectivity Test</span><span class="cbadge" id="conn-status-badge">ยังไม่ทดสอบ</span></div>
+    <div class="conn-grid" id="conn-grid">
+      <div class="ldrow" style="grid-column:1/-1;">กด "ทดสอบทั้งหมด" เพื่อตรวจสอบทุก endpoint</div>
+    </div>
+    <div style="padding:12px 14px;border-top:1px solid var(--b1);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button class="rbtn" onclick="runConnTest()">🔌 ทดสอบทั้งหมด</button>
+      <button class="rbtn" onclick="runQuickTest()" style="color:var(--gold)">⚡ ทดสอบ Railway เร็ว</button>
+      <span id="conn-summary" style="font-family:var(--mono);font-size:.7rem;color:var(--t3);"></span>
+    </div>
+    <div style="padding:0 14px 14px;">
+      <div id="conn-log" style="font-family:var(--mono);font-size:.65rem;color:var(--t3);line-height:1.9;max-height:240px;overflow-y:auto;white-space:pre-wrap;"></div>
+    </div>
+  </div>
+
+  <!-- ── Troubleshoot ── -->
+  <div class="card" style="margin-top:14px;">
+    <div class="ch"><span class="ct">🛠️ การแก้ปัญหา</span></div>
+    <div style="padding:14px;font-size:.8rem;line-height:1.8;color:var(--t2);">
+
+      <details style="margin-bottom:10px;">
+        <summary style="cursor:pointer;color:var(--red);font-weight:600;">❌ HTTP 404 จาก Railway</summary>
+        <div style="padding:8px 0 0 12px;font-size:.77rem;">
+          <p>• Server ยังไม่ได้ deploy — ตรวจสอบ Railway dashboard ว่า build สำเร็จหรือยัง</p>
+          <p>• URL ผิด — Railway URL ต้องลงท้ายด้วย <code style="background:var(--s3);padding:1px 5px;border-radius:3px;">.up.railway.app</code> ไม่ใช่ .railway.app</p>
+          <p>• ไม่มี <code style="background:var(--s3);padding:1px 5px;border-radius:3px;">railway.json</code> ใน repo — ตรวจสอบว่าอัปโหลดไฟล์ครบ</p>
+          <p>• ทดสอบด้วย: เปิด <code style="background:var(--s3);padding:1px 5px;border-radius:3px;">[URL]/health</code> ในเบราว์เซอร์ตรงๆ</p>
+        </div>
+      </details>
+
+      <details style="margin-bottom:10px;">
+        <summary style="cursor:pointer;color:var(--red);font-weight:600;">❌ HTTP 401 Unauthorized</summary>
+        <div style="padding:8px 0 0 12px;font-size:.77rem;">
+          <p>• API Key ผิด — ตรวจสอบ Railway Variables → <code>API_KEY</code></p>
+          <p>• Key ที่กรอกในช่องด้านบนต้องตรงกับ Railway <code>API_KEY</code> ทุกตัวอักษร</p>
+          <p>• ทดสอบด้วย curl: <code style="background:var(--s3);padding:1px 5px;border-radius:3px;">curl -H "X-API-Key: YOUR_KEY" [URL]/api/quote?symbols=AAPL</code></p>
+        </div>
+      </details>
+
+      <details style="margin-bottom:10px;">
+        <summary style="cursor:pointer;color:var(--gold);font-weight:600;">⚠️ Claude AI "Failed to fetch"</summary>
+        <div style="padding:8px 0 0 12px;font-size:.77rem;">
+          <p>• เป็นเรื่องปกติเมื่อเปิดใน <strong>claude.ai</strong> — browser บล็อก direct call ไป Anthropic API (CORS)</p>
+          <p>• แก้: เพิ่ม endpoint <code>/api/ai</code> บน Railway backend ให้ทำหน้าที่เป็น proxy แทน</p>
+          <p>• ในระหว่างนี้: AI วิเคราะห์จะทำงานได้ปกติเมื่อเปิด HTML จาก Netlify หรือ localhost</p>
+        </div>
+      </details>
+
+      <details style="margin-bottom:10px;">
+        <summary style="cursor:pointer;color:var(--gold);font-weight:600;">⚠️ allorigins / proxy Timeout</summary>
+        <div style="padding:8px 0 0 12px;font-size:.77rem;">
+          <p>• allorigins.win อาจช้าหรือล่มในบางช่วง — ระบบใช้เป็น fallback เท่านั้น</p>
+          <p>• ถ้า Railway backend ทำงานปกติ จะไม่ใช้ proxy เลย</p>
+          <p>• ถ้า proxy ล่มพร้อมกับ Railway → ข้อมูลจะแสดง "—" แต่ dashboard ยังเปิดได้</p>
+        </div>
+      </details>
+
+      <details>
+        <summary style="cursor:pointer;color:var(--cyan);font-weight:600;">📋 Railway Deploy Checklist</summary>
+        <div style="padding:8px 0 0 12px;font-size:.77rem;font-family:var(--mono);">
+          <p id="chk1">☐ Push ไฟล์ทั้งหมดขึ้น GitHub (server.js, package.json, railway.json)</p>
+          <p id="chk2">☐ Railway → New Project → Deploy from GitHub repo</p>
+          <p id="chk3">☐ ตั้ง Variables: API_KEY, CACHE_TTL_MS=60000, RATE_LIMIT=120</p>
+          <p id="chk4">☐ รอ build เสร็จ (สังเกต log ว่า "TradeRadar API Server v1.0")</p>
+          <p id="chk5">☐ คัดลอก Railway URL และวางในช่องด้านบน</p>
+          <p id="chk6">☐ กด "ทดสอบทั้งหมด" ให้ผ่าน 6/8 ขึ้นไป</p>
+        </div>
+      </details>
+
+      <div style="margin-top:12px;padding:10px 12px;background:rgba(0,232,122,.05);border:1px solid rgba(0,232,122,.15);border-radius:6px;">
+        <p style="font-family:var(--mono);font-size:.68rem;color:var(--green);">💡 ทดสอบ Railway ด้วย curl (copy แล้วรันใน terminal)</p>
+        <div id="curl-example" style="font-family:var(--mono);font-size:.66rem;color:var(--t2);margin-top:4px;word-break:break-all;"></div>
+      </div>
+
+      <p style="color:var(--red);font-size:.73rem;margin-top:12px;">⚠️ ข้อมูลเพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</p>
+    </div>
+  </div>
+</div>
+
+</div><!-- /wrap -->
+
+<script>
+'use strict';
+// ============================================================
+// CONFIG
+// ============================================================
+const THAI_LIST = [
+  {sym:'PTT.BK',   show:'PTT',    name:'บมจ. ปตท.',              sec:'พลังงาน'},
+  {sym:'CPALL.BK', show:'CPALL',  name:'บมจ. ซีพี ออลล์',       sec:'ค้าปลีก'},
+  {sym:'ADVANC.BK',show:'ADVANC', name:'บมจ. แอดวานซ์ อินโฟ',   sec:'โทรคมนาคม'},
+  {sym:'AOT.BK',   show:'AOT',    name:'บมจ. ท่าอากาศยาน',      sec:'ขนส่ง'},
+  {sym:'KBANK.BK', show:'KBANK',  name:'บมจ. กสิกรไทย',         sec:'ธนาคาร'},
+  {sym:'SCB.BK',   show:'SCB',    name:'บมจ. ไทยพาณิชย์',       sec:'ธนาคาร'},
+  {sym:'DELTA.BK', show:'DELTA',  name:'บมจ. เดลต้า อีเลค',     sec:'อิเล็กทรอนิกส์'},
+  {sym:'MINT.BK',  show:'MINT',   name:'บมจ. ไมเนอร์ อินเตอร์', sec:'ท่องเที่ยว'},
+  {sym:'BBL.BK',   show:'BBL',    name:'บมจ. กรุงเทพ',           sec:'ธนาคาร'},
+  {sym:'GULF.BK',  show:'GULF',   name:'บมจ. กัลฟ์ เอ็นเนอร์จี',sec:'พลังงาน'},
+];
+const GLOBAL_LIST = [
+  {sym:'AAPL',  name:'Apple Inc.',       sec:'Technology'},
+  {sym:'NVDA',  name:'NVIDIA Corp.',     sec:'Semiconductors'},
+  {sym:'TSLA',  name:'Tesla Inc.',       sec:'EV / Auto'},
+  {sym:'MSFT',  name:'Microsoft Corp.', sec:'Technology'},
+  {sym:'AMZN',  name:'Amazon.com Inc.', sec:'E-Commerce'},
+  {sym:'META',  name:'Meta Platforms',  sec:'Social Media'},
+  {sym:'GOOGL', name:'Alphabet Inc.',   sec:'Technology'},
+  {sym:'GLD',   name:'SPDR Gold ETF',   sec:'ETF / Gold'},
+  {sym:'SPY',   name:'S&P500 ETF',      sec:'ETF / Index'},
+  {sym:'QQQ',   name:'NASDAQ ETF',      sec:'ETF / Tech'},
+];
+const BAR_SYMS = ['^SET','^GSPC','^IXIC','GC=F','THBX=X','BTC-USD','^VIX','^TNX'];
+const SECTOR_ETFS = [
+  {sym:'XLK',  name:'Technology',  color:'#3b82f6'},
+  {sym:'XLF',  name:'Financials',  color:'#8b5cf6'},
+  {sym:'XLE',  name:'Energy',      color:'#f59e0b'},
+  {sym:'XLV',  name:'Healthcare',  color:'#10b981'},
+  {sym:'XLI',  name:'Industrials', color:'#6366f1'},
+  {sym:'XLY',  name:'Cons. Disc',  color:'#ec4899'},
+  {sym:'XLP',  name:'Cons. Stapl', color:'#14b8a6'},
+  {sym:'XLRE', name:'Real Estate', color:'#f97316'},
+];
+const SUGGESTIONS = [
+  {sym:'AAPL',    name:'Apple Inc.',             type:'US Stock'},
+  {sym:'NVDA',    name:'NVIDIA Corp.',           type:'US Stock'},
+  {sym:'TSLA',    name:'Tesla Inc.',             type:'US Stock'},
+  {sym:'MSFT',    name:'Microsoft Corp.',        type:'US Stock'},
+  {sym:'AMZN',    name:'Amazon.com',             type:'US Stock'},
+  {sym:'META',    name:'Meta Platforms',         type:'US Stock'},
+  {sym:'GOOGL',   name:'Alphabet Inc.',          type:'US Stock'},
+  {sym:'GLD',     name:'SPDR Gold Shares ETF',   type:'ETF'},
+  {sym:'SPY',     name:'S&P 500 ETF',            type:'ETF'},
+  {sym:'QQQ',     name:'NASDAQ 100 ETF',         type:'ETF'},
+  {sym:'GC=F',    name:'Gold Futures COMEX',     type:'Futures'},
+  {sym:'CL=F',    name:'Crude Oil Futures',      type:'Futures'},
+  {sym:'BTC-USD', name:'Bitcoin / USD',          type:'Crypto'},
+  {sym:'ETH-USD', name:'Ethereum / USD',         type:'Crypto'},
+  {sym:'PTT.BK',  name:'บมจ. ปตท.',             type:'TH Stock'},
+  {sym:'CPALL.BK',name:'บมจ. ซีพี ออลล์',      type:'TH Stock'},
+  {sym:'ADVANC.BK',name:'บมจ. แอดวานซ์ อินโฟ', type:'TH Stock'},
+  {sym:'KBANK.BK',name:'บมจ. กสิกรไทย',        type:'TH Stock'},
+  {sym:'AOT.BK',  name:'บมจ. ท่าอากาศยาน',     type:'TH Stock'},
+  {sym:'BBL.BK',  name:'บมจ. กรุงเทพ',          type:'TH Stock'},
+  {sym:'^SET',    name:'SET Index',              type:'Index'},
+  {sym:'^GSPC',   name:'S&P 500 Index',          type:'Index'},
+  {sym:'^IXIC',   name:'NASDAQ Composite',       type:'Index'},
+  {sym:'^VIX',    name:'CBOE Volatility Index',  type:'Index'},
+  {sym:'^TNX',    name:'US 10Y Treasury Yield',  type:'Bond'},
+  {sym:'THBX=X',  name:'USD/THB Exchange Rate',  type:'FX'},
+  {sym:'JPY=X',   name:'USD/JPY Exchange Rate',  type:'FX'},
+  {sym:'EURUSD=X',name:'EUR/USD Exchange Rate',  type:'FX'},
+];
+
+// ============================================================
+// ⚙️  BACKEND CONFIG — แก้ 2 บรรทัดนี้หลัง deploy Railway
+// ============================================================
+const BACKEND_URL = 'https://YOUR-APP.up.railway.app'; // ← วาง Railway URL ของคุณ
+const BACKEND_KEY = 'YOUR-API-KEY-HERE';               // ← วาง API Key ของคุณ
+
+// ============================================================
+// CLIENT-SIDE CACHE (55s — slightly under server 60s TTL)
+// ============================================================
+const CACHE = {};
+const CACHE_TTL = 55000;
+function sc(k,v,ttl=CACHE_TTL){CACHE[k]={v,exp:Date.now()+ttl};}
+function gc(k){const c=CACHE[k];return(c&&Date.now()<c.exp)?c.v:null;}
+
+// ============================================================
+// GLOBAL STATE
+// ============================================================
+let MQ = {};
+let FG = 50;
+let USDTHB = 33.5;
+let goldData = {};
+let allQuotes = {};
+
+// ============================================================
+// API HELPERS — calls our Railway backend (no CORS issues)
+// ============================================================
+let _useBackend = true; // auto-flips to false if backend unreachable
+
+async function apiFetch(endpoint){
+  const res = await fetch(`${BACKEND_URL}${endpoint}`, {
+    headers: { 'X-API-Key': BACKEND_KEY },
+    signal: AbortSignal.timeout(10000),
+  });
+  if(!res.ok){
+    const err = await res.json().catch(()=>({}));
+    throw new Error(`API ${res.status}: ${err.error||res.statusText}`);
+  }
+  return res.json();
+}
+
+// Fallback: direct Yahoo via corsproxy.io (used when backend is unreachable)
+const PROXY = s => `https://corsproxy.io/?url=${encodeURIComponent(s)}`;
+async function yfDirect(url){
+  // Try corsproxy.io first, then allorigins as last resort
+  try {
+    const r=await fetch(PROXY(url),{signal:AbortSignal.timeout(10000)});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return r.json();
+  } catch(e1) {
+    // Last resort: allorigins
+    const r=await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,{signal:AbortSignal.timeout(12000)});
+    const j=await r.json(); return JSON.parse(j.contents);
+  }
+}
+
+async function yfQuote(syms){
+  const k='q_'+syms; const h=gc(k); if(h)return h;
+  let d;
+  if(_useBackend){
+    try{
+      const resp = await apiFetch(`/api/quote?symbols=${encodeURIComponent(syms)}`);
+      // backend returns {ok, quotes:[...]} — wrap into Yahoo-compatible shape
+      d = { quoteResponse:{ result: resp.quotes||[], error:null } };
+      dot('dot-yf','ok');
+    }catch(e){
+      console.warn('Backend unreachable, falling back to proxy:',e.message);
+      _useBackend=false;
+      dot('dot-yf','warn');
+      d = await yfDirect(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(syms)}&fields=symbol,shortName,regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume,averageVolume,fiftyTwoWeekHigh,fiftyTwoWeekLow,fiftyDayAverage,twoHundredDayAverage,trailingPE,forwardPE,marketCap,dividendYield`);
+    }
+  } else {
+    d = await yfDirect(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(syms)}&fields=symbol,shortName,regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume,averageVolume,fiftyTwoWeekHigh,fiftyTwoWeekLow,fiftyDayAverage,twoHundredDayAverage,trailingPE,forwardPE,marketCap,dividendYield`);
+  }
+  sc(k,d); return d;
+}
+
+async function yfSpark(sym){
+  const k='spark_'+sym; const h=gc(k); if(h)return h;
+  let d;
+  if(_useBackend){
+    try{
+      const resp = await apiFetch(`/api/spark?symbol=${encodeURIComponent(sym)}`);
+      // Re-wrap into Yahoo Spark-compatible shape for existing chart code
+      d = { spark:{ result:[{ response:[{
+        timestamp: resp.timestamps,
+        meta: resp.meta,
+        indicators:{ quote:[{
+          close:  resp.closes,
+          volume: resp.volumes,
+          high:   resp.highs,
+          low:    resp.lows,
+        }]}
+      }]}]}};
+      dot('dot-sp','ok');
+    }catch(e){
+      console.warn('Spark fallback:',e.message);
+      d = await yfDirect(`https://query1.finance.yahoo.com/v8/finance/spark?symbols=${encodeURIComponent(sym)}&range=1d&interval=5m`);
+    }
+  } else {
+    d = await yfDirect(`https://query1.finance.yahoo.com/v8/finance/spark?symbols=${encodeURIComponent(sym)}&range=1d&interval=5m`);
+  }
+  sc(k,d,55000); return d;
+}
+
+async function yfSearch(q){
+  if(_useBackend){
+    try{
+      const resp = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`);
+      return { quotes: resp.quotes.map(r=>({symbol:r.symbol,shortname:r.shortname,typeDisp:r.type,exchDisp:r.exchange})) };
+    }catch{}
+  }
+  const url=`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=7&newsCount=0`;
+  return yfDirect(url);
+}
+
+function q2map(data){const m={};(data?.quoteResponse?.result||[]).forEach(q=>{m[q.symbol]=q;});return m;}
+
+// ============================================================
+// TECHNICAL CALCULATIONS
+// ============================================================
+function calcRSI(prices, period=14){
+  if(prices.length < period+1) return 50;
+  let gains=0, losses=0;
+  for(let i=prices.length-period; i<prices.length; i++){
+    const diff=prices[i]-prices[i-1];
+    if(diff>0) gains+=diff; else losses+=Math.abs(diff);
+  }
+  const avgG=gains/period, avgL=losses/period;
+  if(avgL===0) return 100;
+  const rs=avgG/avgL;
+  return Math.round(100-(100/(1+rs)));
+}
+
+function calcEMA(prices, period){
+  if(prices.length<period) return prices[prices.length-1]||0;
+  const k=2/(period+1);
+  let ema=prices.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  for(let i=period;i<prices.length;i++) ema=prices[i]*k+ema*(1-k);
+  return ema;
+}
+
+function calcMACD(prices){
+  if(prices.length<26) return {macd:0,signal:0,hist:0};
+  const ema12=calcEMA(prices,12), ema26=calcEMA(prices,26);
+  const macd=ema12-ema26;
+  const signal=macd*0.9; // simplified
+  return {macd:+macd.toFixed(3), signal:+signal.toFixed(3), hist:+(macd-signal).toFixed(3)};
+}
+
+function calcBB(prices, period=20){
+  if(prices.length<period) return {upper:0,middle:0,lower:0,bw:0};
+  const slice=prices.slice(-period);
+  const mean=slice.reduce((a,b)=>a+b,0)/period;
+  const variance=slice.reduce((a,b)=>a+(b-mean)**2,0)/period;
+  const std=Math.sqrt(variance);
+  return {upper:+(mean+2*std).toFixed(2), middle:+mean.toFixed(2), lower:+(mean-2*std).toFixed(2), bw:+(4*std/mean*100).toFixed(2)};
+}
+
+function calcVolRatio(vol, avgVol){
+  if(!avgVol) return 1;
+  return +(vol/avgVol).toFixed(2);
+}
+
+function computeSignal(q, sparkPrices=[]){
+  // Multi-factor signal scoring
+  const pct   = q?.regularMarketChangePercent || 0;
+  const price  = q?.regularMarketPrice || 0;
+  const ma50   = q?.fiftyDayAverage || 0;
+  const ma200  = q?.twoHundredDayAverage || 0;
+  const vol    = q?.regularMarketVolume || 0;
+  const avgVol = q?.averageVolume || 1;
+  const hi52   = q?.fiftyTwoWeekHigh || 0;
+  const lo52   = q?.fiftyTwoWeekLow || 0;
+
+  let score = 0; // -100 to +100
+  const reasons = [];
+
+  // 1. Price momentum
+  if(pct>2){score+=20;reasons.push(`📈 +${f(pct,1)}% วันนี้ (Strong)`);}
+  else if(pct>0.5){score+=10;reasons.push(`📈 +${f(pct,1)}% วันนี้`);}
+  else if(pct<-2){score-=20;reasons.push(`📉 ${f(pct,1)}% วันนี้ (Weak)`);}
+  else if(pct<-0.5){score-=10;reasons.push(`📉 ${f(pct,1)}% วันนี้`);}
+
+  // 2. MA cross
+  if(ma50&&ma200){
+    if(price>ma50&&ma50>ma200){score+=25;reasons.push('✅ ราคา > MA50 > MA200 (Bullish)');}
+    else if(price>ma50){score+=12;reasons.push('✅ ราคา > MA50');}
+    else if(price<ma50&&ma50<ma200){score-=25;reasons.push('❌ ราคา < MA50 < MA200 (Bearish)');}
+    else if(price<ma50){score-=12;reasons.push('❌ ราคา < MA50');}
+  }
+
+  // 3. Volume
+  const vr=calcVolRatio(vol,avgVol);
+  if(vr>1.5&&pct>0){score+=15;reasons.push(`📊 Volume ${f(vr,1)}x avg (Breakout confirm)`);}
+  else if(vr>1.5&&pct<0){score-=10;reasons.push(`📊 Volume สูง ${f(vr,1)}x (Distribution)`);}
+  else if(vr<0.5){reasons.push(`📊 Volume ต่ำ ${f(vr,1)}x (ระวัง fake move)`);}
+
+  // 4. 52W position
+  if(hi52&&lo52&&price){
+    const pos=((price-lo52)/(hi52-lo52))*100;
+    if(pos>80){score-=10;reasons.push(`📍 ใกล้ 52W High (${f(pos,0)}%) ระวัง resistance`);}
+    else if(pos<20){score+=10;reasons.push(`📍 ใกล้ 52W Low (${f(pos,0)}%) อาจ oversold`);}
+  }
+
+  // 5. RSI (from spark data)
+  let rsi=50;
+  if(sparkPrices.length>15){
+    rsi=calcRSI(sparkPrices);
+    if(rsi>70){score-=15;reasons.push(`⚠️ RSI ${rsi} — Overbought`);}
+    else if(rsi>60){score+=5;reasons.push(`RSI ${rsi} — Bullish zone`);}
+    else if(rsi<30){score+=15;reasons.push(`💡 RSI ${rsi} — Oversold (機会?)`);}
+    else if(rsi<40){score-=5;reasons.push(`RSI ${rsi} — Bearish zone`);}
+  }
+
+  // Final signal
+  let signal='WAIT', sigClass='sWAIT';
+  if(score>=30){signal='BUY';sigClass='sBUY';}
+  else if(score>=10){signal='WATCH';sigClass='sWATCH';}
+  else if(score<=-30){signal='SELL';sigClass='sSELL';}
+  else if(score<=-10){signal='HOLD';sigClass='sHOLD';}
+  else{signal='HOLD';sigClass='sHOLD';}
+
+  return {score, signal, sigClass, reasons, rsi};
+}
+
+// ============================================================
+// FORMATTING
+// ============================================================
+const f=(n,d=2)=>n==null||isNaN(n)?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const cls=v=>(v>=0?'u':'d');
+const bgcls=v=>(v>=0?'bu':'bd');
+function sigHTML(s,cls2){return `<span class="srs ${cls2}">${s}</span>`;}
+function dot(id,s){const e=document.getElementById(id);if(e)e.className='adot '+s;}
+function setMV(id,val,pct){
+  const v=document.getElementById('mv-'+id), c=document.getElementById('mc-'+id);
+  if(v)v.textContent=val;
+  if(c){c.textContent=(pct>=0?'+':'')+f(pct,2)+'%';c.className='mchg '+bgcls(pct);}
+}
+
+// ============================================================
+// LOAD MARKET BAR
+// ============================================================
+async function loadBar(){
+  try{
+    const d=await yfQuote(BAR_SYMS.join(','));
+    const q=q2map(d); MQ=q;
+
+    if(q['^SET'])   setMV('set', f(q['^SET'].regularMarketPrice,2), q['^SET'].regularMarketChangePercent);
+    if(q['^GSPC'])  setMV('sp',  f(q['^GSPC'].regularMarketPrice,2),q['^GSPC'].regularMarketChangePercent);
+    if(q['^IXIC'])  setMV('nq',  f(q['^IXIC'].regularMarketPrice,2),q['^IXIC'].regularMarketChangePercent);
+    if(q['GC=F'])   setMV('gold','$'+f(q['GC=F'].regularMarketPrice,2),q['GC=F'].regularMarketChangePercent);
+    if(q['THBX=X']){setMV('thb',f(q['THBX=X'].regularMarketPrice,3),q['THBX=X'].regularMarketChangePercent);USDTHB=q['THBX=X'].regularMarketPrice||33.5;}
+    if(q['BTC-USD'])setMV('btc','$'+f(q['BTC-USD'].regularMarketPrice,0),q['BTC-USD'].regularMarketChangePercent);
+    if(q['^VIX']){
+      const v=q['^VIX'].regularMarketPrice;
+      setMV('vix',f(v,2),q['^VIX'].regularMarketChangePercent);
+      document.getElementById('ig-vix').textContent=f(v,2);
+      document.getElementById('ig-vix-sig').innerHTML=`<span class="${v>30?'d':v>20?'':'u'}">${v>30?'🚨 Panic':v>20?'⚠️ Elevated':'✅ Low'}</span>`;
+    }
+    if(q['THBX=X']){document.getElementById('ig-thb').textContent=f(USDTHB,3);document.getElementById('ig-thb-sig').innerHTML=`<span class="${USDTHB>36?'d':USDTHB<33?'u':''}">${USDTHB>36?'THB Weak':USDTHB<33?'THB Strong':'Neutral'}</span>`;}
+    if(q['^TNX']){const y=q['^TNX'].regularMarketPrice;setMV('tnx',f(y,3)+'%',q['^TNX'].regularMarketChangePercent);document.getElementById('ig-tnx').textContent=f(y,3)+'%';document.getElementById('ig-tnx-sig').innerHTML=`<span class="${y>4.5?'d':y<3.5?'u':''}">${y>4.5?'High (Pressure)':y<3.5?'Low (Supportive)':'Neutral'}</span>`;}
+
+    dot('dot-yf','ok');
+    renderOverallSignal();
+    renderMarketSession();
+    return true;
+  }catch(e){dot('dot-yf','err');console.warn('bar err',e);return false;}
+}
+
+// ============================================================
+// LOAD DXY (separate since it may not be in BAR_SYMS)
+// ============================================================
+async function loadDXY(){
+  try{
+    const d=await yfQuote('DX-Y.NYB');
+    const q=q2map(d)['DX-Y.NYB'];
+    if(q){document.getElementById('ig-dxy').textContent=f(q.regularMarketPrice,2);document.getElementById('ig-dxy-sig').innerHTML=`<span class="${q.regularMarketChangePercent>0?'d':'u'}">${q.regularMarketChangePercent>0?'↑ Dollar Strong':'↓ Dollar Weak'}</span>`;}
+  }catch{}
+}
+
+// ============================================================
+// FEAR & GREED
+// ============================================================
+async function loadFG(){
+  try{
+    let value, lbl;
+    if(_useBackend){
+      try{
+        const resp = await apiFetch('/api/fear-greed');
+        value = resp.value; lbl = resp.classification;
+      }catch{
+        // fallback to direct
+        const r=await fetch('https://api.alternative.me/fng/?limit=1',{signal:AbortSignal.timeout(6000)});
+        const d=await r.json(); value=parseInt(d.data[0].value); lbl=d.data[0].value_classification;
+      }
+    } else {
+      const r=await fetch('https://api.alternative.me/fng/?limit=1',{signal:AbortSignal.timeout(6000)});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const d=await r.json(); value=parseInt(d.data[0].value); lbl=d.data[0].value_classification;
+    }
+    FG=value;
+    const col=FG<25?'#ff3355':FG<45?'#ff7a1a':FG<55?'#ffc840':FG<75?'#a8e040':'#00e87a';
+    const el=document.getElementById('fg-num'); if(el){el.textContent=FG;el.style.color=col;}
+    const needle=document.getElementById('fg-ndl'); if(needle)needle.style.left=FG+'%';
+    const lble=document.getElementById('fg-lbl'); if(lble)lble.textContent=lbl;
+    const badge=document.getElementById('fg-badge');
+    if(badge){badge.textContent=lbl;badge.className='cbadge '+(FG<40?'red':FG<60?'gold':'green');}
+    dot('dot-fg','ok');
+    return true;
+  }catch(e){dot('dot-fg','err');console.warn('fg err',e);return false;}
+}
+
+// ============================================================
+// LOAD STOCK LIST WITH RSI
+// ============================================================
+async function loadList(items, containerId, cur){
+  const el=document.getElementById(containerId); if(!el)return;
+  el.innerHTML='<div class="ldrow">⟳ กำลังดึงข้อมูล...</div>';
+  try{
+    const syms=items.map(s=>s.sym).join(',');
+    const d=await yfQuote(syms);
+    const qm=q2map(d);
+    // Get spark for RSI (batch fetch top ones)
+    const sparkData={};
+    await Promise.allSettled(items.slice(0,6).map(async s=>{
+      try{
+        const sp=await yfSpark(s.sym);
+        const arr=sp?.spark?.result?.[0]?.response?.[0]?.indicators?.quote?.[0]?.close||[];
+        sparkData[s.sym]=arr.filter(v=>v!=null);
+      }catch{}
+    }));
+
+    el.innerHTML=items.map(s=>{
+      const q=qm[s.sym]||{};
+      const p=q.regularMarketPrice, ch=q.regularMarketChange, pc=q.regularMarketChangePercent;
+      const vol=q.regularMarketVolume, avgVol=q.averageVolume;
+      const sparkPrices=sparkData[s.sym]||[];
+      const {signal,sigClass,rsi}=computeSignal(q,sparkPrices);
+      const vr=vol&&avgVol?calcVolRatio(vol,avgVol):null;
+      const show=s.show||s.sym;
+      // RSI bar
+      const rsiBar=sparkPrices.length>5?`<div class="rsi-bar"><div class="rsi-ptr" style="left:${rsi}%"></div></div><div style="font-family:var(--mono);font-size:.62rem;text-align:center;color:${rsi>70?'var(--red)':rsi<30?'var(--green)':'var(--t3)'}">${rsi}</div>`:`<div style="font-family:var(--mono);font-size:.64rem;color:var(--t3);text-align:center">—</div>`;
+      return `<div class="srow" onclick="openAnalyze('${s.sym}','${show}')">
+        <div><div class="stk">${show}</div></div>
+        <div><div class="snm">${s.name}</div><div class="ssc">${s.sec}</div></div>
+        <div class="spr">${p!=null?cur+f(p):'—'}</div>
+        <div class="sch ${cls(pc||0)}">${pc!=null?(pc>=0?'+':'')+f(pc,2)+'%':'—'}</div>
+        <div class="sch" style="font-family:var(--mono);font-size:.67rem;text-align:right;color:var(--t3)">${vr?`${f(vr,1)}x vol`:'—'}</div>
+        <div>${rsiBar}</div>
+        <div>${sigHTML(signal,sigClass)}</div>
+      </div>`;
+    }).join('');
+
+    // Store for overview
+    if(containerId==='list-thai') renderMovers('mover-thai',items,qm,'฿');
+    if(containerId==='list-global') renderMovers('mover-global',items,qm,'$');
+    dot('dot-yf','ok');
+    // also store all
+    Object.assign(allQuotes,qm);
+    renderRSIPanel(items,qm,sparkData);
+    renderVolPanel(items,qm);
+  }catch(e){
+    el.innerHTML=`<div class="errmsg">⚠️ โหลดไม่ได้: ${e.message}</div>`;
+    dot('dot-yf','err');
+  }
+}
+
+// ============================================================
+// RENDER MOVERS
+// ============================================================
+function renderMovers(containerId, items, qm, cur){
+  const el=document.getElementById(containerId); if(!el)return;
+  const sorted=[...items].sort((a,b)=>{
+    const pa=qm[a.sym]?.regularMarketChangePercent||0;
+    const pb=qm[b.sym]?.regularMarketChangePercent||0;
+    return Math.abs(pb)-Math.abs(pa);
+  }).slice(0,5);
+  el.innerHTML=sorted.map(s=>{
+    const q=qm[s.sym]||{};
+    const p=q.regularMarketPrice, pc=q.regularMarketChangePercent;
+    const show=s.show||s.sym;
+    return `<div class="srow" style="grid-template-columns:70px 1fr 90px 80px 70px;cursor:pointer" onclick="openAnalyze('${s.sym}','${show}')">
+      <div class="stk">${show}</div>
+      <div class="snm">${s.name}</div>
+      <div class="spr">${p!=null?cur+f(p):'—'}</div>
+      <div class="sch ${cls(pc||0)}">${pc!=null?(pc>=0?'+':'')+f(pc,2)+'%':'—'}</div>
+      <div>${sigHTML(computeSignal(q).signal,computeSignal(q).sigClass)}</div>
+    </div>`;
+  }).join('');
+}
+
+// ============================================================
+// RSI PANEL
+// ============================================================
+function renderRSIPanel(items, qm, sparkData){
+  const el=document.getElementById('rsi-panel'); if(!el)return;
+  el.innerHTML=items.map(s=>{
+    const q=qm[s.sym]||{};
+    const sp=sparkData[s.sym]||[];
+    const rsi=sp.length>5?calcRSI(sp):null;
+    const show=s.show||s.sym;
+    const col=rsi==null?'var(--t3)':rsi>70?'var(--red)':rsi<30?'var(--green)':'var(--cyan)';
+    const label=rsi==null?'—':rsi>70?'Overbought':rsi>60?'Bullish':rsi<30?'Oversold':rsi<40?'Bearish':'Neutral';
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:6px 8px;background:var(--s2);border-radius:4px;">
+      <span style="font-family:var(--mono);font-size:.72rem;color:var(--cyan);min-width:60px;">${show}</span>
+      <div style="flex:1"><div class="rsi-bar">${rsi!=null?`<div class="rsi-ptr" style="left:${rsi}%"></div>`:''}</div></div>
+      <span style="font-family:var(--mono);font-size:.72rem;font-weight:700;color:${col};min-width:30px;">${rsi??'—'}</span>
+      <span style="font-family:var(--mono);font-size:.62rem;color:var(--t3);min-width:80px;">${label}</span>
+    </div>`;
+  }).join('');
+}
+
+// ============================================================
+// VOLUME PANEL
+// ============================================================
+function renderVolPanel(items, qm){
+  const el=document.getElementById('vol-panel'); if(!el)return;
+  el.innerHTML=items.slice(0,8).map(s=>{
+    const q=qm[s.sym]||{};
+    const vol=q.regularMarketVolume, avg=q.averageVolume;
+    const vr=vol&&avg?calcVolRatio(vol,avg):null;
+    const show=s.show||s.sym;
+    const colVR=vr==null?'var(--t3)':vr>2?'var(--orange)':vr>1.5?'var(--gold)':vr<0.5?'var(--t3)':'var(--cyan)';
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:7px;padding:6px 8px;background:var(--s2);border-radius:4px;">
+      <span style="font-family:var(--mono);font-size:.72rem;color:var(--cyan);min-width:60px;">${show}</span>
+      <div style="flex:1;height:4px;background:var(--b1);border-radius:2px;overflow:hidden;"><div style="height:100%;width:${Math.min((vr||0)*50,100)}%;background:${colVR};border-radius:2px;transition:width .5s;"></div></div>
+      <span style="font-family:var(--mono);font-size:.7rem;font-weight:700;color:${colVR};min-width:40px;">${vr?vr+'x':'—'}</span>
+      <span style="font-family:var(--mono);font-size:.6rem;color:var(--t3);">${vol?fVol(vol):'—'}</span>
+    </div>`;
+  }).join('');
+}
+function fVol(n){if(n>1e9)return f(n/1e9,1)+'B';if(n>1e6)return f(n/1e6,1)+'M';if(n>1e3)return f(n/1e3,1)+'K';return n;}
+
+// ============================================================
+// SECTOR HEATMAP
+// ============================================================
+async function loadHeatmap(){
+  const el=document.getElementById('heatmap'); if(!el)return;
+  try{
+    const syms=SECTOR_ETFS.map(s=>s.sym).join(',');
+    const d=await yfQuote(syms);
+    const qm=q2map(d);
+    el.innerHTML=SECTOR_ETFS.map(s=>{
+      const q=qm[s.sym]||{};
+      const pc=q.regularMarketChangePercent||0;
+      const intensity=Math.min(Math.abs(pc)/3,1);
+      const bg=pc>0?`rgba(0,232,122,${0.15+intensity*0.45})`:`rgba(255,51,85,${0.15+intensity*0.45})`;
+      return `<div class="hcell" style="background:${bg};" onclick="openAnalyze('${s.sym}','${s.name}')">
+        <div class="hcname">${s.name}</div>
+        <div class="hcval ${cls(pc)}">${pc>=0?'+':''}${f(pc,2)}%</div>
+        <div style="font-family:var(--mono);font-size:.58rem;color:rgba(255,255,255,.5);margin-top:2px;">${s.sym}</div>
+      </div>`;
+    }).join('');
+  }catch(e){el.innerHTML=`<div class="errmsg">⚠️ ${e.message}</div>`;}
+}
+
+// ============================================================
+// GOLD
+// ============================================================
+async function loadGold(){
+  try{
+    const d=await yfQuote(['GC=F','GLD','THBX=X'].join(','));
+    const qm=q2map(d);
+    const gf=qm['GC=F'], gld=qm['GLD'], thb=qm['THBX=X'];
+    goldData={gf,gld,thb};
+
+    if(gf){
+      const p=gf.regularMarketPrice, ch=gf.regularMarketChange, pc=gf.regularMarketChangePercent;
+      document.getElementById('g-spot').textContent='$'+f(p,2);
+      document.getElementById('g-spot-c').innerHTML=`<span class="${cls(ch)}">${ch>=0?'+':''}${f(ch,2)} (${pc>=0?'+':''}${f(pc,2)}%)</span>`;
+      if(thb){const thaiG=p*(15.244/31.1035)*0.965*thb.regularMarketPrice;document.getElementById('g-th').textContent='฿'+f(thaiG,0);}
+      document.getElementById('g-hi').textContent='$'+f(gf.fiftyTwoWeekHigh,2);
+      document.getElementById('g-lo').textContent='$'+f(gf.fiftyTwoWeekLow,2);
+      const lo=gf.fiftyTwoWeekLow||0, hi=gf.fiftyTwoWeekHigh||0;
+      const rsiEst=lo&&hi?Math.round(((p-lo)/(hi-lo))*70+15):50;
+      document.getElementById('g-rsi').innerHTML=`<span class="${rsiEst>70?'d':rsiEst<35?'u':''}">${rsiEst}</span>`;
+      const sig=rsiEst>70?'⚠️ Overbought':pc>0?'📈 Bullish':'📉 Bearish';
+      document.getElementById('g-sig').textContent=sig;
+      // Signal meter
+      const bullScore=(rsiEst<50?30:0)+(pc>0?30:0)+(p>gf.fiftyDayAverage?20:0);
+      document.getElementById('g-sigfill').style.width=bullScore+'%';
+      document.getElementById('g-sigfill').style.background=bullScore>60?'var(--green)':bullScore>40?'var(--gold)':'var(--red)';
+      document.getElementById('g-sigval').innerHTML=`<span class="${bullScore>60?'u':bullScore<40?'d':''}">${bullScore>60?'🟢 BUY':bullScore>40?'🟡 HOLD':'🔴 SELL'}</span>`;
+    }
+    if(gld){document.getElementById('g-gld').textContent='$'+f(gld.regularMarketPrice,2);const c=gld.regularMarketChange;document.getElementById('g-gld-c').innerHTML=`<span class="${cls(c)}">${c>=0?'+':''}${f(c,2)}</span>`;}
+    if(gf&&gf.regularMarketPrice&&gf.fiftyDayAverage&&gf.twoHundredDayAverage){
+      renderGoldTech(gf);
+    }
+
+    // Load spark for chart
+    try{
+      const sp=await yfSpark('GC=F');
+      const prices=sp?.spark?.result?.[0]?.response?.[0]?.indicators?.quote?.[0]?.close||[];
+      const valid=prices.filter(v=>v!=null);
+      if(valid.length>2) drawChart('goldChart',valid,'#ffc840',true);
+      dot('dot-sp','ok');
+    }catch{dot('dot-sp','warn');}
+
+    dot('dot-yf','ok');
+  }catch(e){dot('dot-yf','err');console.warn('gold err',e);}
+}
+
+function renderGoldTech(q){
+  const el=document.getElementById('gold-tech'); if(!el)return;
+  const p=q.regularMarketPrice, ma50=q.fiftyDayAverage, ma200=q.twoHundredDayAverage;
+  const lo=q.fiftyTwoWeekLow||0, hi=q.fiftyTwoWeekHigh||0;
+  const pos52=hi-lo>0?((p-lo)/(hi-lo)*100):50;
+  const rsiEst=Math.round(pos52*.7+15);
+  const macd=calcMACD([lo,lo*1.02,lo*1.05,lo*1.1,ma200,ma50*0.99,ma50,p*0.99,p]);
+  const bb=calcBB([lo*1.1,lo*1.15,ma200,ma200*1.02,ma50*0.98,ma50,p*0.98,p]);
+
+  el.innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+    <div class="wltcard ${p>ma50?'bull':'bear'}">
+      <div class="wtlabel">MA50</div>
+      <div class="wtval">$${f(ma50,2)}</div>
+      <div class="wtsig ${p>ma50?'u':'d'}">${p>ma50?'ราคา > MA50 ✅':'ราคา < MA50 ❌'}</div>
+    </div>
+    <div class="wltcard ${p>ma200?'bull':'bear'}">
+      <div class="wtlabel">MA200</div>
+      <div class="wtval">$${f(ma200,2)}</div>
+      <div class="wtsig ${p>ma200?'u':'d'}">${p>ma200?'Uptrend ✅':'Downtrend ❌'}</div>
+    </div>
+    <div class="wltcard ${rsiEst<30?'bull':rsiEst>70?'bear':'neutral'}">
+      <div class="wtlabel">RSI(14) est.</div>
+      <div class="wtval" style="color:${rsiEst>70?'var(--red)':rsiEst<30?'var(--green)':'var(--gold)'}">${rsiEst}</div>
+      <div class="wtsig">${rsiEst>70?'⚠️ Overbought':rsiEst<30?'💡 Oversold':'🔵 Neutral'}</div>
+    </div>
+    <div class="wltcard ${macd.hist>0?'bull':'bear'}">
+      <div class="wtlabel">MACD</div>
+      <div class="wtval ${macd.hist>0?'u':'d'}">${macd.hist>=0?'+':''}${f(macd.hist,2)}</div>
+      <div class="wtsig">${macd.hist>0?'Bullish Cross ✅':'Bearish Cross ❌'}</div>
+    </div>
+    <div class="wltcard neutral">
+      <div class="wtlabel">Bollinger Upper</div>
+      <div class="wtval">$${f(bb.upper,2)}</div>
+      <div class="wtsig" style="color:var(--t3)">BW: ${bb.bw}%</div>
+    </div>
+    <div class="wltcard neutral">
+      <div class="wtlabel">Bollinger Lower</div>
+      <div class="wtval">$${f(bb.lower,2)}</div>
+      <div class="wtsig ${p<bb.lower?'u':''}">${p<bb.lower?'⬇️ Below BB!':'ยังใน Band'}</div>
+    </div>
+    <div class="wltcard neutral" style="grid-column:1/-1">
+      <div class="wtlabel">52W Position</div>
+      <div style="height:6px;background:var(--b1);border-radius:3px;margin:4px 0;overflow:hidden;"><div style="height:100%;width:${f(pos52,0)}%;background:linear-gradient(90deg,var(--green),var(--gold),var(--red));border-radius:3px;"></div></div>
+      <div class="wtsig" style="color:var(--t3)">${f(pos52,0)}% of 52W range — $${f(lo,0)} → $${f(hi,0)}</div>
+    </div>
+  </div>`;
+}
+
+// ============================================================
+// TECHNICAL TAB
+// ============================================================
+let techSym='GC=F';
+async function techSelect(btn,sym){
+  document.querySelectorAll('#tech-syms .symbtn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  techSym=sym;
+  await loadTechChart(sym);
+}
+
+async function loadTechChart(sym){
+  const label=document.getElementById('tech-chart-label');
+  if(label)label.textContent=sym+' — Intraday';
+  document.getElementById('tech-indicators').innerHTML='<div class="ldrow">⟳</div>';
+  document.getElementById('tech-summary').innerHTML='<div class="ldrow">⟳</div>';
+
+  try{
+    // Spark data
+    const sp=await yfSpark(sym);
+    const prices=(sp?.spark?.result?.[0]?.response?.[0]?.indicators?.quote?.[0]?.close||[]).filter(v=>v!=null);
+    const times=sp?.spark?.result?.[0]?.response?.[0]?.timestamp||[];
+    if(prices.length>2){
+      drawChart('techChart',prices,'#00d4ff',true,times);
+      dot('dot-sp','ok');
+    }
+
+    // Quote data
+    const qd=await yfQuote(sym); const q=q2map(qd)[sym];
+    if(!q)return;
+
+    const rsi=prices.length>15?calcRSI(prices):null;
+    const macd=prices.length>26?calcMACD(prices):{macd:0,signal:0,hist:0};
+    const bb=prices.length>20?calcBB(prices):{upper:q.regularMarketPrice*1.02,middle:q.regularMarketPrice,lower:q.regularMarketPrice*0.98,bw:2};
+    const ema20=prices.length>20?calcEMA(prices,20):q.fiftyDayAverage;
+    const vr=q.regularMarketVolume&&q.averageVolume?calcVolRatio(q.regularMarketVolume,q.averageVolume):null;
+    const {signal,sigClass,score,reasons}=computeSignal(q,prices);
+
+    // Badge update
+    const badge=document.getElementById('tech-sig-badge');
+    if(badge){badge.textContent=signal;badge.className='cbadge '+(signal==='BUY'?'green':signal==='SELL'?'red':'');}
+
+    // Indicators
+    document.getElementById('tech-indicators').innerHTML=`
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:6px;">
+        <div style="background:var(--s2);border-radius:4px;padding:7px 9px;">
+          <div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">RSI(14)</div>
+          <div style="font-family:var(--mono);font-size:.88rem;font-weight:700;color:${rsi==null?'var(--t3)':rsi>70?'var(--red)':rsi<30?'var(--green)':'var(--cyan)'}">${rsi??'—'}</div>
+          <div class="rsi-bar" style="margin-top:3px;">${rsi!=null?`<div class="rsi-ptr" style="left:${rsi}%"></div>`:''}</div>
+        </div>
+        <div style="background:var(--s2);border-radius:4px;padding:7px 9px;">
+          <div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">MACD Hist</div>
+          <div style="font-family:var(--mono);font-size:.88rem;font-weight:700;color:${macd.hist>0?'var(--green)':'var(--red)'};">${macd.hist>=0?'+':''}${f(macd.hist,3)}</div>
+          <div style="font-family:var(--mono);font-size:.6rem;color:var(--t3);margin-top:3px;">${macd.hist>0?'Bullish':'Bearish'}</div>
+        </div>
+        <div style="background:var(--s2);border-radius:4px;padding:7px 9px;">
+          <div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">EMA20</div>
+          <div style="font-family:var(--mono);font-size:.88rem;font-weight:700;color:${q.regularMarketPrice>ema20?'var(--green)':'var(--red)'};">${f(ema20,2)}</div>
+          <div style="font-family:var(--mono);font-size:.6rem;color:var(--t3);margin-top:3px;">${q.regularMarketPrice>ema20?'Price > EMA20':'Price < EMA20'}</div>
+        </div>
+        <div style="background:var(--s2);border-radius:4px;padding:7px 9px;">
+          <div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">Volume Ratio</div>
+          <div style="font-family:var(--mono);font-size:.88rem;font-weight:700;color:${vr>1.5?'var(--orange)':'var(--t2)'};">${vr?vr+'x':'—'}</div>
+          <div style="font-family:var(--mono);font-size:.6rem;color:var(--t3);margin-top:3px;">${vr>1.5?'High Activity':vr<0.5?'Low Vol':'Normal'}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px;">
+        <div style="background:var(--s2);border-radius:4px;padding:7px 9px;">
+          <div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">BB Upper</div>
+          <div style="font-family:var(--mono);font-size:.82rem;font-weight:700;">${f(bb.upper)}</div>
+        </div>
+        <div style="background:var(--s2);border-radius:4px;padding:7px 9px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">BB Mid (${f(bb.bw,1)}% BW)</div>
+          <div style="font-family:var(--mono);font-size:.82rem;font-weight:700;color:var(--gold);">${f(bb.middle)}</div>
+        </div>
+        <div style="background:var(--s2);border-radius:4px;padding:7px 9px;text-align:right;">
+          <div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">BB Lower</div>
+          <div style="font-family:var(--mono);font-size:.82rem;font-weight:700;">${f(bb.lower)}</div>
+        </div>
+      </div>`;
+
+    // Summary
+    const p=q.regularMarketPrice, ma50=q.fiftyDayAverage, ma200=q.twoHundredDayAverage;
+    document.getElementById('tech-summary').innerHTML=`
+      <div style="margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+          <span style="font-family:var(--mono);font-size:1.3rem;font-weight:700;color:var(--cyan);">${sym}</span>
+          <span style="font-family:var(--mono);font-size:1rem;font-weight:700;">${f(p)}</span>
+          <span class="${cls(q.regularMarketChangePercent||0)}" style="font-family:var(--mono);font-size:.82rem;">${(q.regularMarketChangePercent>=0?'+':'')+f(q.regularMarketChangePercent,2)}%</span>
+        </div>
+        <div class="sigbar" style="padding:0;margin-bottom:12px;">
+          <span class="siglabel" style="font-size:.62rem;">Bearish</span>
+          <div class="sigmeter"><div class="sigfill" style="width:${Math.max(0,Math.min(100,(score+100)/2))}%;background:${score>20?'var(--green)':score<-20?'var(--red)':'var(--gold)'};"></div></div>
+          <span class="siglabel" style="font-size:.62rem;">Bullish</span>
+          <span style="font-family:var(--mono);font-size:.72rem;font-weight:700;color:${score>20?'var(--green)':score<-20?'var(--red)':'var(--gold)'};min-width:60px;text-align:right;">Score: ${score>0?'+':''}${score}</span>
+        </div>
+        ${reasons.map(r=>`<div style="font-size:.76rem;color:var(--t2);padding:3px 0;border-bottom:1px solid rgba(24,40,64,.3);">${r}</div>`).join('')}
+      </div>
+      <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        <div style="background:var(--s2);border-radius:4px;padding:8px;"><div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">MA50</div><div style="font-family:var(--mono);font-size:.82rem;color:${p>ma50?'var(--green)':'var(--red)'};">${f(ma50,2)}</div></div>
+        <div style="background:var(--s2);border-radius:4px;padding:8px;"><div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">MA200</div><div style="font-family:var(--mono);font-size:.82rem;color:${p>ma200?'var(--green)':'var(--red)'};">${f(ma200,2)}</div></div>
+        <div style="background:var(--s2);border-radius:4px;padding:8px;"><div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">52W High</div><div style="font-family:var(--mono);font-size:.82rem;">${f(q.fiftyTwoWeekHigh,2)}</div></div>
+        <div style="background:var(--s2);border-radius:4px;padding:8px;"><div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">52W Low</div><div style="font-family:var(--mono);font-size:.82rem;">${f(q.fiftyTwoWeekLow,2)}</div></div>
+        ${q.trailingPE?`<div style="background:var(--s2);border-radius:4px;padding:8px;"><div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">P/E (TTM)</div><div style="font-family:var(--mono);font-size:.82rem;">${f(q.trailingPE,1)}x</div></div>`:''}
+        ${q.marketCap?`<div style="background:var(--s2);border-radius:4px;padding:8px;"><div style="font-family:var(--mono);font-size:.58rem;color:var(--t3)">Mkt Cap</div><div style="font-family:var(--mono);font-size:.82rem;">${fCap(q.marketCap)}</div></div>`:''}
+      </div>`;
+  }catch(e){
+    document.getElementById('tech-summary').innerHTML=`<div class="errmsg">⚠️ ${e.message}</div>`;
+  }
+}
+function fCap(n){if(n>1e12)return f(n/1e12,2)+'T';if(n>1e9)return f(n/1e9,1)+'B';if(n>1e6)return f(n/1e6,1)+'M';return f(n,0);}
+
+// ============================================================
+// CHART DRAWING
+// ============================================================
+function drawChart(id, prices, color, fill=true, timestamps=[]){
+  const canvas=document.getElementById(id); if(!canvas)return;
+  const W=canvas.offsetWidth||canvas.parentElement.offsetWidth||500;
+  canvas.width=W; canvas.height=canvas.height||80;
+  const H=canvas.height;
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  if(prices.length<2)return;
+
+  const mn=Math.min(...prices), mx=Math.max(...prices);
+  const rng=mx-mn||mn*0.01;
+  const pts=prices.map((v,i)=>({x:(i/(prices.length-1))*(W-4)+2, y:H-((v-mn)/rng)*(H-6)-3}));
+
+  // Grid
+  ctx.strokeStyle='rgba(24,40,64,.5)';ctx.lineWidth=1;
+  for(let i=1;i<4;i++){const y=H*(i/4);ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+
+  // Fill
+  if(fill){
+    const up=prices[prices.length-1]>=prices[0];
+    const g=ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,up?'rgba(0,232,122,.25)':'rgba(255,51,85,.2)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+    pts.forEach(p=>ctx.lineTo(p.x,p.y));
+    ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();
+    ctx.fillStyle=g;ctx.fill();
+    color=up?'#00e87a':'#ff3355';
+  }
+
+  // Line
+  ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+  pts.forEach(p=>ctx.lineTo(p.x,p.y));
+  ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineJoin='round';ctx.stroke();
+
+  // Last dot + value
+  const last=pts[pts.length-1];
+  ctx.beginPath();ctx.arc(last.x,last.y,4,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
+  ctx.fillStyle=color;ctx.font='bold 10px JetBrains Mono,monospace';
+  ctx.fillText(f(prices[prices.length-1],2),last.x-30,last.y-8);
+}
+
+// ============================================================
+// MARKET SESSION
+// ============================================================
+function renderMarketSession(){
+  const now=new Date();
+  const thHour=now.getUTCHours()+7;
+  const nyHour=now.getUTCHours()-4; // EDT approximate
+  const sessions=[
+    {name:'🇹🇭 SET',open:10,close:16.5,hour:thHour%24,tz:'TH'},
+    {name:'🇬🇧 London',open:8,close:16.5,hour:(now.getUTCHours()+1)%24,tz:'BST'},
+    {name:'🇺🇸 NYSE',open:9.5,close:16,hour:((nyHour%24)+24)%24,tz:'EDT'},
+    {name:'🌐 Crypto',open:0,close:24,hour:thHour%24,tz:'—'},
+  ];
+  const el=document.getElementById('sess-items'); if(!el)return;
+  el.innerHTML=sessions.map(s=>{
+    const isOpen=s.name.includes('Crypto')||(s.hour>=s.open&&s.hour<s.close);
+    return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;padding:5px 8px;background:var(--s2);border-radius:4px;">
+      <span style="font-size:.76rem;">${s.name}</span>
+      <span style="font-family:var(--mono);font-size:.65rem;padding:2px 7px;border-radius:3px;background:${isOpen?'rgba(0,232,122,.12)':'rgba(255,51,85,.1)'};color:${isOpen?'var(--green)':'var(--t3)'};">${isOpen?'● OPEN':'○ CLOSED'}</span>
+    </div>`;
+  }).join('');
+  const badge=document.getElementById('mkt-session');
+  const usOpen=((nyHour%24)+24)%24>=9.5&&((nyHour%24)+24)%24<16;
+  const thOpen=(thHour%24)>=10&&(thHour%24)<16.5;
+  if(badge){badge.textContent=usOpen?'US Open':thOpen?'TH Open':'After Hours';badge.className='cbadge '+(usOpen||thOpen?'green':'');}
+}
+
+// ============================================================
+// OVERALL SIGNAL
+// ============================================================
+function renderOverallSignal(){
+  const el=document.getElementById('ov-signal-body'); if(!el)return;
+  const vix=MQ['^VIX']?.regularMarketPrice||20;
+  const spPct=MQ['^GSPC']?.regularMarketChangePercent||0;
+  const setPct=MQ['^SET']?.regularMarketChangePercent||0;
+
+  let score=0;
+  const pts=[];
+  if(spPct>0.5){score+=20;pts.push(`📈 S&P500 ${spPct>0?'+':''}${f(spPct,2)}%`);}
+  else if(spPct<-0.5){score-=20;pts.push(`📉 S&P500 ${f(spPct,2)}%`);}
+  if(vix<15){score+=15;pts.push('✅ VIX ต่ำ (Calm)');}
+  else if(vix>30){score-=25;pts.push('🚨 VIX สูง (Panic)');}
+  else if(vix>20){score-=10;pts.push('⚠️ VIX Elevated');}
+  if(FG<25){score-=15;pts.push('😱 Extreme Fear');}
+  else if(FG>75){score+=15;pts.push('😈 Extreme Greed');}
+  if(setPct>0.3){score+=10;pts.push(`🇹🇭 SET +${f(setPct,2)}%`);}
+  else if(setPct<-0.3){score-=10;pts.push(`🇹🇭 SET ${f(setPct,2)}%`);}
+
+  const label=score>20?'🟢 Risk ON':score<-20?'🔴 Risk OFF':'🟡 Neutral';
+  const col=score>20?'var(--green)':score<-20?'var(--red)':'var(--gold)';
+  const badge=document.getElementById('ov-sig-badge');
+  if(badge){badge.textContent=score>20?'Risk ON':score<-20?'Risk OFF':'Neutral';badge.className='cbadge '+(score>20?'green':score<-20?'red':'gold');}
+
+  el.innerHTML=`<div style="font-family:var(--mono);font-size:1.6rem;font-weight:700;color:${col};margin-bottom:8px;">${label}</div>
+    <div style="font-family:var(--mono);font-size:.7rem;color:var(--t3);margin-bottom:8px;">Score: ${score>0?'+':''}${score}/80</div>
+    ${pts.slice(0,4).map(p=>`<div style="font-size:.74rem;color:var(--t2);padding:2px 0;">${p}</div>`).join('')}`;
+}
+
+// ============================================================
+// SEARCH
+// ============================================================
+let sTimer=null, sResults=[];
+const si=document.getElementById('si');
+const sdd=document.getElementById('sdd');
+
+si.addEventListener('input',function(){
+  clearTimeout(sTimer);
+  const q=this.value.trim();
+  if(!q){closeSDD();return;}
+  sTimer=setTimeout(()=>doSearch(q),320);
+});
+si.addEventListener('keydown',e=>{if(e.key==='Escape')closeSDD();if(e.key==='Enter'&&sResults.length)pickSym(sResults[0]);});
+document.addEventListener('click',e=>{if(!document.getElementById('swrap').contains(e.target))closeSDD();});
+
+function closeSDD(){sdd.classList.remove('open');sResults=[];}
+
+async function doSearch(raw){
+  const q=raw.toUpperCase();
+  document.getElementById('ssp').style.display='block';
+  document.getElementById('sico').style.display='none';
+
+  const local=SUGGESTIONS.filter(s=>s.sym.includes(q)||s.name.toUpperCase().includes(q)).slice(0,5);
+  let yahoo=[];
+  try{
+    const data=await yfSearch(raw);
+    yahoo=(data.quotes||[]).slice(0,5).map(r=>({sym:r.symbol,name:r.shortname||r.longname||r.symbol,type:r.typeDisp||r.quoteType||'—'}));
+  }catch{}
+
+  const seen=new Set(local.map(s=>s.sym));
+  const merged=[...local,...yahoo.filter(y=>!seen.has(y.sym))].slice(0,8);
+  sResults=merged;
+
+  let pm={};
+  if(merged.length){
+    try{const d=await yfQuote(merged.map(s=>s.sym).join(','));pm=q2map(d);}catch{}
+  }
+
+  document.getElementById('ssp').style.display='none';
+  document.getElementById('sico').style.display='block';
+
+  if(!merged.length){
+    sdd.innerHTML=`<div class="dd-empty">ไม่พบ "${raw}" — ลอง: AAPL, PTT.BK, GC=F</div>`;
+  }else{
+    sdd.innerHTML=`<div class="dd-sec">ผลการค้นหา</div>`+merged.map(s=>{
+      const lq=pm[s.sym];
+      const p=lq?.regularMarketPrice, pc=lq?.regularMarketChangePercent;
+      const ps=p!=null?`<span class="dd-pr ${cls(pc||0)}">${p>10000?f(p,0):f(p,2)}${pc!=null?' ('+(pc>=0?'+':'')+f(pc,2)+'%)':''}</span>`:'';
+      const safeS=JSON.stringify(s).replace(/"/g,'&quot;');
+      const safeLQ=JSON.stringify(lq||{}).replace(/"/g,'&quot;');
+      return `<div class="dd-row" onclick="pickSym(${safeS},${safeLQ})">
+        <span class="dd-tk">${s.sym}</span>
+        <span class="dd-nm">${s.name}</span>
+        <span class="dd-tp">${s.type||'—'}</span>${ps}
+      </div>`;
+    }).join('');
+  }
+  sdd.classList.add('open');
+}
+
+function pickSym(s,lq){closeSDD();si.value='';showWLCard(s,lq||{});}
+
+// ============================================================
+// WATCHLIST CARD
+// ============================================================
+const WL={};
+async function showWLCard(s,lq){
+  const cid='wc-'+s.sym.replace(/[^a-z0-9]/gi,'_');
+  if(WL[s.sym]){document.getElementById(cid)?.scrollIntoView({behavior:'smooth'});return;}
+  WL[s.sym]=true;
+
+  let q=lq;
+  if(!q?.regularMarketPrice){
+    try{const d=await yfQuote(s.sym);q=q2map(d)[s.sym]||{};}catch{q={};}
+  }
+
+  // Fetch spark
+  let sparkPrices=[];
+  try{const sp=await yfSpark(s.sym);sparkPrices=(sp?.spark?.result?.[0]?.response?.[0]?.indicators?.quote?.[0]?.close||[]).filter(v=>v!=null);}catch{}
+
+  const p=q.regularMarketPrice, ch=q.regularMarketChange, pc=q.regularMarketChangePercent;
+  const {signal,sigClass,score,reasons}=computeSignal(q,sparkPrices);
+  const rsi=sparkPrices.length>15?calcRSI(sparkPrices):null;
+  const macd=sparkPrices.length>26?calcMACD(sparkPrices):{macd:0,signal:0,hist:0};
+  const vr=q.regularMarketVolume&&q.averageVolume?calcVolRatio(q.regularMarketVolume,q.averageVolume):null;
+
+  const card=document.createElement('div');
+  card.className='wlcard'; card.id=cid;
+  const isTH=s.sym.includes('.BK');
+  const thaiPrice=p&&isTH?(p).toFixed(2):null; // already in THB
+  const thaiPriceStr=thaiPrice?`฿${thaiPrice}`:p?'$'+f(p,p>1000?0:2):'—';
+
+  card.innerHTML=`
+  <div class="wltop">
+    <div>
+      <div class="wlticker">${s.sym} <span style="font-size:.6rem;color:var(--t3);font-family:var(--mono)">${s.type||''}</span></div>
+      <div class="wlsub">${s.name||q.shortName||''}</div>
+    </div>
+    <div class="wlactions">
+      <button class="wlbtn ai" onclick="openAnalyze('${s.sym}','${s.sym}')">🤖 AI</button>
+      <button class="wlbtn ai" onclick="techSelect2('${s.sym}')">📈 Technical</button>
+      <button class="wlbtn cls" onclick="rmWL('${s.sym}')">✕</button>
+    </div>
+  </div>
+  <div class="wlg">
+    <div class="wls"><div class="wlsl">ราคา</div><div class="wlsv">${thaiPriceStr}</div></div>
+    <div class="wls"><div class="wlsl">% วันนี้</div><div class="wlsv ${cls(pc||0)}">${pc!=null?(pc>=0?'+':'')+f(pc,2)+'%':'—'}</div></div>
+    <div class="wls"><div class="wlsl">เปลี่ยน</div><div class="wlsv ${cls(ch||0)}">${ch!=null?(ch>=0?'+':'')+f(ch,2):'—'}</div></div>
+    <div class="wls"><div class="wlsl">Volume</div><div class="wlsv">${q.regularMarketVolume?fVol(q.regularMarketVolume):'—'}</div></div>
+    <div class="wls"><div class="wlsl">52W Hi</div><div class="wlsv">${q.fiftyTwoWeekHigh?f(q.fiftyTwoWeekHigh,q.fiftyTwoWeekHigh>1000?0:2):'—'}</div></div>
+    <div class="wls"><div class="wlsl">52W Lo</div><div class="wlsv">${q.fiftyTwoWeekLow?f(q.fiftyTwoWeekLow,q.fiftyTwoWeekLow>1000?0:2):'—'}</div></div>
+  </div>
+  <div class="wltech">
+    <div class="wltcard ${rsi==null?'neutral':rsi>70?'bear':rsi<30?'bull':'neutral'}">
+      <div class="wtlabel">RSI(14)</div>
+      <div class="wtval" style="color:${rsi==null?'var(--t3)':rsi>70?'var(--red)':rsi<30?'var(--green)':'var(--cyan)'}">${rsi??'—'}</div>
+      <div class="wtsig">${rsi==null?'ไม่มีข้อมูล':rsi>70?'Overbought ⚠️':rsi<30?'Oversold 💡':rsi>60?'Bullish':'Bearish'}</div>
+    </div>
+    <div class="wltcard ${macd.hist>0?'bull':'bear'}">
+      <div class="wtlabel">MACD Hist</div>
+      <div class="wtval ${macd.hist>0?'u':'d'}">${sparkPrices.length>26?(macd.hist>=0?'+':'')+f(macd.hist,3):'—'}</div>
+      <div class="wtsig">${sparkPrices.length>26?(macd.hist>0?'Bullish ✅':'Bearish ❌'):'ไม่มีข้อมูล'}</div>
+    </div>
+    <div class="wltcard ${vr&&vr>1.3?'bull':'neutral'}">
+      <div class="wtlabel">Volume Ratio</div>
+      <div class="wtval" style="color:${vr&&vr>1.5?'var(--orange)':'var(--t2)'}">${vr?vr+'x avg':'—'}</div>
+      <div class="wtsig">${vr==null?'—':vr>2?'🔥 Very High':vr>1.5?'📊 High':vr<0.5?'😴 Low':'Normal'}</div>
+    </div>
+    <div class="wltcard ${q.fiftyDayAverage&&p>q.fiftyDayAverage?'bull':'bear'}">
+      <div class="wtlabel">vs MA50</div>
+      <div class="wtval ${q.fiftyDayAverage?(p>q.fiftyDayAverage?'u':'d'):''}">${q.fiftyDayAverage?f(q.fiftyDayAverage,2):'—'}</div>
+      <div class="wtsig">${q.fiftyDayAverage?(p>q.fiftyDayAverage?'Price > MA50 ✅':'Price < MA50 ❌'):'—'}</div>
+    </div>
+  </div>
+  <div style="margin-bottom:10px;">
+    <div class="sigbar" style="padding:0;margin-bottom:8px;">
+      <span class="siglabel" style="font-size:.6rem">Bearish</span>
+      <div class="sigmeter"><div class="sigfill" style="width:${Math.max(0,Math.min(100,(score+100)/2))}%;background:${score>20?'var(--green)':score<-20?'var(--red)':'var(--gold)'}"></div></div>
+      <span class="siglabel" style="font-size:.6rem">Bullish</span>
+      <span style="font-family:var(--mono);font-size:.7rem;font-weight:700;color:${score>20?'var(--green)':score<-20?'var(--red)':'var(--gold)'};min-width:55px;text-align:right">${signal} (${score>0?'+':''}${score})</span>
+    </div>
+    ${reasons.slice(0,3).map(r=>`<div style="font-size:.72rem;color:var(--t3);padding:2px 0;">${r}</div>`).join('')}
+  </div>
+  <div class="chart-wrap" style="padding:4px 0 0;"><canvas id="wlc-${s.sym.replace(/[^a-z0-9]/gi,'_')}" height="55"></canvas></div>
+  <div class="wlfoot">
+    <span class="wlsrc">Yahoo Finance · ${new Date().toLocaleTimeString('th-TH')} ${q.trailingPE?`· P/E: ${f(q.trailingPE,1)}x`:''}</span>
+    ${sigHTML(signal,sigClass)}
+  </div>`;
+
+  document.getElementById('wlarea').insertBefore(card,document.getElementById('wlarea').firstChild);
+  card.scrollIntoView({behavior:'smooth',block:'nearest'});
+
+  // Draw chart
+  if(sparkPrices.length>2){
+    setTimeout(()=>drawChart(`wlc-${s.sym.replace(/[^a-z0-9]/gi,'_')}`,sparkPrices,pc>=0?'#00e87a':'#ff3355',true),100);
+  }
+}
+
+function rmWL(sym){
+  const cid='wc-'+sym.replace(/[^a-z0-9]/gi,'_');
+  const el=document.getElementById(cid);
+  if(el){el.style.transition='all .2s';el.style.opacity='0';el.style.transform='translateY(-10px)';setTimeout(()=>el.remove(),220);}
+  delete WL[sym];
+}
+
+function techSelect2(sym){
+  switchTab(null,'technical');
+  document.querySelectorAll('#tech-syms .symbtn').forEach(b=>b.classList.remove('active'));
+  loadTechChart(sym);
+}
+
+// ============================================================
+// AI ANALYSIS
+// ============================================================
+function mktCtxStr(){
+  const q=MQ;
+  return [
+    `SET: ${f(q['^SET']?.regularMarketPrice,2)} (${f(q['^SET']?.regularMarketChangePercent,2)}%)`,
+    `S&P500: ${f(q['^GSPC']?.regularMarketPrice,2)} (${f(q['^GSPC']?.regularMarketChangePercent,2)}%)`,
+    `Gold: $${f(q['GC=F']?.regularMarketPrice,2)} (${f(q['GC=F']?.regularMarketChangePercent,2)}%)`,
+    `USD/THB: ${f(USDTHB,2)}`,
+    `VIX: ${f(q['^VIX']?.regularMarketPrice,2)}`,
+    `Fear&Greed: ${FG}/100`,
+    `10Y Yield: ${f(q['^TNX']?.regularMarketPrice,3)}%`,
+  ].join(' | ');
+}
+
+function aiSelSym(btn,sym,show){
+  document.querySelectorAll('#ai-syms .symbtn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  runAIAnalysis(sym,show);
+}
+
+function openAnalyze(sym,show){
+  switchTab(null,'ai');
+  document.querySelectorAll('.tab[data-tab="ai"]').forEach(e=>e.classList.add('active'));
+  runAIAnalysis(sym,show);
+}
+
+async function runAIAnalysis(sym,show){
+  const body=document.getElementById('aibody');
+  body.innerHTML=`<div class="aiload"><div class="aispin"></div>กำลังดึงข้อมูล real-time และวิเคราะห์ ${show}...</div>`;
+  dot('dot-ai','warn');
+
+  let liveCtx='', techCtx='';
+  try{
+    const d=await yfQuote(sym); const q=q2map(d)[sym];
+    if(q){
+      const p=q.regularMarketPrice,pc=q.regularMarketChangePercent,ma50=q.fiftyDayAverage,ma200=q.twoHundredDayAverage;
+      liveCtx=`ราคา: ${f(p,2)}, เปลี่ยน: ${f(pc,2)}%, MA50: ${f(ma50,2)}, MA200: ${f(ma200,2)}, 52W Hi/Lo: ${f(q.fiftyTwoWeekHigh,2)}/${f(q.fiftyTwoWeekLow,2)}, Vol: ${q.regularMarketVolume?fVol(q.regularMarketVolume):'—'}, P/E: ${q.trailingPE?f(q.trailingPE,1)+'x':'—'}`;
+      // compute signals
+      let spPrices=[];
+      try{const sp=await yfSpark(sym);spPrices=(sp?.spark?.result?.[0]?.response?.[0]?.indicators?.quote?.[0]?.close||[]).filter(v=>v!=null);}catch{}
+      if(spPrices.length>5){
+        const rsi=calcRSI(spPrices),macd=calcMACD(spPrices),{signal}=computeSignal(q,spPrices);
+        techCtx=`RSI: ${rsi}, MACD Hist: ${macd.hist>0?'+':''}${f(macd.hist,3)}, Signal: ${signal}`;
+      }
+    }
+  }catch{}
+
+  const prompt=`คุณเป็นนักวิเคราะห์ตลาดหุ้นมืออาชีพระดับ CFA
+
+📊 ภาพรวมตลาดวันนี้:
+${mktCtxStr()}
+
+📈 ข้อมูล ${show} (${sym}):
+${liveCtx||'(ไม่มีข้อมูล real-time)'}
+${techCtx?`\nIndicators: ${techCtx}`:''}
+
+กรุณาวิเคราะห์แบบมืออาชีพ:
+
+**1. สรุปสถานการณ์** — ราคาอยู่จุดไหนเทียบกับ trend หลัก
+**2. Technical Analysis** — Support/Resistance สำคัญ, trend direction, momentum
+**3. RSI & MACD** — ตีความ oversold/overbought, divergence
+**4. Volume Analysis** — ยืนยันหรือขัดแย้งกับ price action
+**5. คำแนะนำที่ชัดเจน** — ซื้อ/ขาย/ถือ/รอ พร้อมเหตุผลและ entry point
+**6. Stop Loss & Target** — ระดับ SL และ TP ที่แนะนำ
+**7. ความเสี่ยง** — ปัจจัยที่อาจทำให้ผิดพลาด
+
+ตอบภาษาไทย กระชับ ปฏิบัติได้จริง ให้ตัวเลขที่ชัดเจน`;
+
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1200,messages:[{role:'user',content:prompt}]})
+    });
+    if(!r.ok){const e=await r.json();throw new Error(e.error?.message||'HTTP '+r.status);}
+    const d=await r.json();
+    const text=d.content?.[0]?.text||'ไม่สามารถวิเคราะห์ได้';
+    const html=text.replace(/\*\*(.*?)\*\*/g,'<strong style="color:var(--cyan)">$1</strong>').replace(/\n/g,'<br>');
+    body.innerHTML=`
+      <div style="font-family:var(--mono);font-size:.65rem;color:var(--t3);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--b1);">
+        🤖 <span style="color:var(--cyan)">${show}</span> (${sym}) · ${new Date().toLocaleTimeString('th-TH')}<br>
+        <span style="opacity:.6">${liveCtx||'—'}</span>
+      </div>
+      <div class="aitxt">${html}</div>`;
+    dot('dot-ai','ok');
+  }catch(e){
+    body.innerHTML=`<div class="errmsg">⚠️ Claude AI error: ${e.message}</div>`;
+    dot('dot-ai','err');
+  }
+}
+
+async function askAI(){
+  const btn=document.getElementById('aibtn'), inp=document.getElementById('aiq');
+  const q=inp.value.trim(); if(!q)return;
+  btn.disabled=true; btn.textContent='...';
+  document.getElementById('aibody').innerHTML=`<div class="aiload"><div class="aispin"></div>วิเคราะห์...</div>`;
+  const prompt=`คุณเป็นนักวิเคราะห์ตลาดหุ้นมืออาชีพ\n\nตลาดปัจจุบัน:\n${mktCtxStr()}\n\nคำถาม: ${q}\n\nตอบภาษาไทย ชัดเจน มี entry/exit ที่ชัดเจน`;
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:prompt}]})});
+    const d=await r.json();
+    const text=d.content?.[0]?.text||'—';
+    const html=text.replace(/\*\*(.*?)\*\*/g,'<strong style="color:var(--cyan)">$1</strong>').replace(/\n/g,'<br>');
+    document.getElementById('aibody').innerHTML=`<div class="aitxt">${html}</div>`;
+    dot('dot-ai','ok');
+  }catch(e){document.getElementById('aibody').innerHTML=`<div class="errmsg">⚠️ ${e.message}</div>`;dot('dot-ai','err');}
+  btn.disabled=false;btn.textContent='ถาม →';inp.value='';
+}
+
+// ============================================================
+// BACKEND CONFIG — runtime editable (saves to sessionStorage)
+// ============================================================
+function loadSavedConfig(){
+  const url = sessionStorage.getItem('tr_backend_url') || '';
+  const key = sessionStorage.getItem('tr_backend_key') || '';
+  if(url) { window.BACKEND_URL = url; window.BACKEND_KEY = key; }
+  updateConfigUI();
+}
+
+function saveBackendConfig(){
+  const url = document.getElementById('cfg-url').value.trim().replace(/\/+$/,'');
+  const key = document.getElementById('cfg-key').value.trim();
+  const msg = document.getElementById('cfg-save-msg');
+  if(!url){ msg.textContent = '⚠️ กรุณาใส่ Railway URL'; msg.style.color='var(--red)'; return; }
+  if(!key){ msg.textContent = '⚠️ กรุณาใส่ API Key'; msg.style.color='var(--red)'; return; }
+  if(!url.startsWith('http')){ msg.textContent = '⚠️ URL ต้องขึ้นต้นด้วย https://'; msg.style.color='var(--red)'; return; }
+  sessionStorage.setItem('tr_backend_url', url);
+  sessionStorage.setItem('tr_backend_key', key);
+  window.BACKEND_URL = url;
+  window.BACKEND_KEY = key;
+  window._useBackend = true;
+  msg.textContent = '✅ บันทึกแล้ว — กำลังทดสอบ...';
+  msg.style.color = 'var(--green)';
+  updateConfigUI();
+  setTimeout(()=>{ msg.textContent=''; }, 3000);
+  runQuickTest();
+}
+
+function clearBackendConfig(){
+  sessionStorage.removeItem('tr_backend_url');
+  sessionStorage.removeItem('tr_backend_key');
+  window.BACKEND_URL = 'https://YOUR-APP.up.railway.app';
+  window.BACKEND_KEY = 'YOUR-API-KEY-HERE';
+  window._useBackend = false;
+  document.getElementById('cfg-url').value = '';
+  document.getElementById('cfg-key').value = '';
+  document.getElementById('cfg-save-msg').textContent = '🗑️ ล้างค่าแล้ว — ใช้ fallback proxy';
+  updateConfigUI();
+}
+
+function updateConfigUI(){
+  const url = window.BACKEND_URL || '';
+  const key = window.BACKEND_KEY || '';
+  const configured = url && !url.includes('YOUR-APP');
+
+  // Show URL
+  const urlEl = document.getElementById('show-backend-url');
+  if(urlEl) urlEl.textContent = configured ? url : '⚠️ ยังไม่ได้ตั้งค่า';
+
+  // Show key (masked)
+  const keyEl = document.getElementById('show-backend-key');
+  if(keyEl) keyEl.textContent = configured && key ? key.slice(0,8)+'••••••••' : '—';
+
+  // Mode
+  const modeEl = document.getElementById('show-backend-mode');
+  if(modeEl){ modeEl.textContent = configured ? '🚂 Railway backend' : '🔄 fallback proxy'; modeEl.style.color = configured ? 'var(--green)' : 'var(--gold)'; }
+
+  // Config badge
+  const badge = document.getElementById('cfg-status-badge');
+  if(badge){ badge.textContent = configured ? 'ตั้งค่าแล้ว ✅' : 'ยังไม่ได้ตั้งค่า'; badge.className = 'cbadge '+(configured?'green':''); }
+
+  // Config banner
+  const banner = document.getElementById('cfg-banner');
+  if(banner){
+    if(configured){
+      banner.style.display='block';
+      banner.style.background='rgba(0,232,122,.07)';
+      banner.style.border='1px solid rgba(0,232,122,.2)';
+      banner.style.color='var(--green)';
+      banner.textContent='✅ Backend: '+url;
+    } else {
+      banner.style.display='block';
+      banner.style.background='rgba(255,200,64,.07)';
+      banner.style.border='1px solid rgba(255,200,64,.2)';
+      banner.style.color='var(--gold)';
+      banner.textContent='⚠️ ยังไม่ได้ตั้งค่า Railway URL — กรุณากรอกด้านล่าง หรือระบบจะใช้ fallback proxy แทน';
+    }
+  }
+
+  // Pre-fill form if already set
+  const urlInput = document.getElementById('cfg-url');
+  const keyInput = document.getElementById('cfg-key');
+  if(urlInput && configured && !urlInput.value) urlInput.value = url;
+  if(keyInput && configured && !keyInput.value) keyInput.value = key;
+
+  // Update curl example
+  const curlEl = document.getElementById('curl-example');
+  if(curlEl){
+    const displayUrl = configured ? url : 'https://YOUR-APP.up.railway.app';
+    const displayKey = configured && key ? key : 'YOUR-API-KEY';
+    curlEl.innerHTML =
+      `<span style="color:var(--cyan)">curl</span> ${displayUrl}/health<br>` +
+      `<span style="color:var(--cyan)">curl</span> -H "X-API-Key: ${displayKey}" "${displayUrl}/api/quote?symbols=AAPL"`;
+  }
+}
+
+// Quick test — Railway health only
+async function runQuickTest(){
+  const log = document.getElementById('conn-log');
+  const badge = document.getElementById('conn-status-badge');
+  const grid = document.getElementById('conn-grid');
+  const url = window.BACKEND_URL;
+  const key = window.BACKEND_KEY;
+
+  if(!url || url.includes('YOUR-APP')){
+    if(log) log.textContent = '⚠️ กรุณาตั้งค่า Railway URL ก่อน';
+    return;
+  }
+
+  badge.textContent = 'กำลังทดสอบ Railway...';
+  grid.innerHTML = '<div class="ldrow" style="grid-column:1/-1;">⟳ กำลังทดสอบ Railway backend...</div>';
+  if(log) log.textContent = '';
+
+  const tests = [
+    { label:'GET /health (no auth)', url:`${url}/health`, headers:{} },
+    { label:'GET /api/quote (with key)', url:`${url}/api/quote?symbols=AAPL`, headers:{'X-API-Key':key} },
+    { label:'Auth reject (no key)', url:`${url}/api/quote?symbols=AAPL`, headers:{}, expectStatus:401 },
+  ];
+
+  grid.innerHTML = '';
+  let passed = 0, failed = 0;
+
+  for(const t of tests){
+    const row = document.createElement('div'); row.className='conn-row';
+    row.innerHTML=`<span class="conn-name">${t.label}</span><span class="conn-status"><span class="adot warn"></span>...</span>`;
+    grid.appendChild(row);
+    const statusEl = row.querySelector('.conn-status');
+    const start = performance.now();
+    try{
+      const r = await fetch(t.url, { headers:t.headers, signal:AbortSignal.timeout(8000) });
+      const lat = Math.round(performance.now()-start);
+      const ok = t.expectStatus ? r.status===t.expectStatus : r.ok;
+      const d = await r.json().catch(()=>({}));
+      if(ok){
+        passed++;
+        let detail = t.expectStatus ? `HTTP ${r.status} (expected)` : (d.status||d.count!=null?`HTTP ${r.status}`:`HTTP ${r.status}`);
+        if(d.quotes?.[0]?.regularMarketPrice) detail = `AAPL: $${f(d.quotes[0].regularMarketPrice,2)}`;
+        if(d.status==='ok') detail = `uptime: ${d.uptime}, cache: ${d.cache?.valid||0} keys`;
+        statusEl.innerHTML=`<span class="adot ok"></span><span class="u">OK</span><span class="conn-lat">${lat}ms</span>`;
+        if(log) log.textContent += `✓ ${t.label} — ${detail} (${lat}ms)\n`;
+      } else {
+        failed++;
+        statusEl.innerHTML=`<span class="adot err"></span><span class="d">HTTP ${r.status}</span><span class="conn-lat">${lat}ms</span>`;
+        if(log) log.textContent += `✗ ${t.label} — HTTP ${r.status}: ${d.error||JSON.stringify(d).slice(0,60)} (${lat}ms)\n`;
+      }
+    } catch(e){
+      const lat = Math.round(performance.now()-start);
+      failed++;
+      statusEl.innerHTML=`<span class="adot err"></span><span class="d">FAIL</span><span class="conn-lat">${lat}ms</span>`;
+      if(log) log.textContent += `✗ ${t.label} — ${e.message} (${lat}ms)\n`;
+    }
+  }
+
+  badge.textContent = failed===0 ? 'Railway OK ✅' : `${failed} Failed`;
+  badge.className = 'cbadge '+(failed===0?'green':'red');
+  dot('dot-yf', failed===0?'ok':'err');
+
+  if(failed===0){
+    window._useBackend = true;
+    if(log) log.textContent += '\n✅ Railway backend พร้อมใช้งาน!\n';
+  } else {
+    if(log) log.textContent += '\n💡 ดูวิธีแก้ปัญหาในส่วน "การแก้ปัญหา" ด้านล่าง\n';
+  }
+}
+
+// ============================================================
+// CONNECTIVITY TEST — Full 8-point test
+// ============================================================
+const CONN_TESTS = [
+  // 1. Railway health
+  { id:'backend', name:'🚂 Railway Backend /health', critical:true, fn:async()=>{
+    const url = window.BACKEND_URL;
+    if(!url||url.includes('YOUR-APP')) throw new Error('ยังไม่ได้ตั้งค่า BACKEND_URL — กรอกในส่วน "ตั้งค่า" ด้านบน');
+    const r = await fetch(`${url}/health`, { signal:AbortSignal.timeout(8000) });
+    if(!r.ok) throw new Error(`HTTP ${r.status} — ตรวจสอบว่า Railway deploy สำเร็จหรือยัง`);
+    const d = await r.json();
+    if(d.status!=='ok') throw new Error('status: '+d.status);
+    return `uptime: ${d.uptime} | cache keys: ${d.cache?.valid||0} | TTL: ${d.cache?.ttl_ms||0}ms`;
+  }},
+  // 2. API Key auth
+  { id:'auth', name:'🔑 API Key Authentication', critical:true, fn:async()=>{
+    const url = window.BACKEND_URL, key = window.BACKEND_KEY;
+    if(!url||url.includes('YOUR-APP')) throw new Error('ยังไม่ได้ตั้งค่า URL');
+    // Test valid key
+    const r = await fetch(`${url}/api/quote?symbols=AAPL`, { headers:{'X-API-Key':key}, signal:AbortSignal.timeout(8000) });
+    if(r.status===401) throw new Error('API Key ผิด — ตรวจสอบ Railway Variables → API_KEY');
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    const price = d.quotes?.[0]?.regularMarketPrice;
+    if(!price) throw new Error('ได้รับข้อมูลแต่ไม่มีราคา — Yahoo Finance อาจมีปัญหา');
+    // Test invalid key → should be 401
+    const r2 = await fetch(`${url}/api/quote?symbols=AAPL`, { headers:{'X-API-Key':'wrong-key'}, signal:AbortSignal.timeout(5000) });
+    if(r2.status!==401) throw new Error('Auth ไม่ได้ reject key ผิด (ควรได้ 401)');
+    return `AAPL: $${f(price,2)} | auth reject: ✅ 401 | cached: ${d.cached||false}`;
+  }},
+  // 3. Spark chart
+  { id:'sp', name:'📈 Backend Spark /api/spark', critical:false, fn:async()=>{
+    const url = window.BACKEND_URL, key = window.BACKEND_KEY;
+    if(!url||url.includes('YOUR-APP')) throw new Error('ยังไม่ได้ตั้งค่า URL');
+    const r = await fetch(`${url}/api/spark?symbol=GC%3DF`, { headers:{'X-API-Key':key}, signal:AbortSignal.timeout(8000) });
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if(!d.count||d.count<2) throw new Error('ข้อมูล spark ไม่พอ: '+d.count+' points');
+    const closes = d.closes?.filter(v=>v!=null)||[];
+    return `${closes.length} candles | range: ${d.range} | interval: ${d.interval}`;
+  }},
+  // 4. Fear & Greed
+  { id:'fg', name:'😱 Backend /api/fear-greed', critical:false, fn:async()=>{
+    const url = window.BACKEND_URL, key = window.BACKEND_KEY;
+    if(!url||url.includes('YOUR-APP')) throw new Error('ยังไม่ได้ตั้งค่า URL');
+    const r = await fetch(`${url}/api/fear-greed`, { headers:{'X-API-Key':key}, signal:AbortSignal.timeout(8000) });
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if(d.value==null) throw new Error('ไม่มีข้อมูล F&G');
+    return `${d.value}/100 — ${d.classification} | cached: ${d.cached}`;
+  }},
+  // 5. FX rate
+  { id:'fx', name:'💱 Backend /api/fx', critical:false, fn:async()=>{
+    const url = window.BACKEND_URL, key = window.BACKEND_KEY;
+    if(!url||url.includes('YOUR-APP')) throw new Error('ยังไม่ได้ตั้งค่า URL');
+    const r = await fetch(`${url}/api/fx?from=USD&to=THB`, { headers:{'X-API-Key':key}, signal:AbortSignal.timeout(8000) });
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if(!d.rate) throw new Error('ไม่มีข้อมูล rate');
+    return `USD/THB: ${d.rate} | date: ${d.date} | cached: ${d.cached}`;
+  }},
+  // 6. Rate limit
+  { id:'rate', name:'🛡️ Rate Limit Headers', critical:false, fn:async()=>{
+    const url = window.BACKEND_URL, key = window.BACKEND_KEY;
+    if(!url||url.includes('YOUR-APP')) return 'ข้ามเพราะยังไม่ตั้งค่า URL';
+    const r = await fetch(`${url}/api/quote?symbols=MSFT`, { headers:{'X-API-Key':key}, signal:AbortSignal.timeout(8000) });
+    if(r.status===429) throw new Error('Rate limit triggered! ลด request หรือเพิ่ม RATE_LIMIT ใน env');
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    return `HTTP ${r.status} — ไม่ถูก rate limit`;
+  }},
+  // 7. Claude AI — works via claude.ai built-in, may fail in standalone
+  { id:'ai', name:'🤖 Claude AI API', critical:false, fn:async()=>{
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      signal:AbortSignal.timeout(12000),
+      body:JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:10, messages:[{role:'user',content:'Say: OK'}] })
+    });
+    if(!r.ok){
+      const e = await r.json().catch(()=>({}));
+      throw new Error((e.error?.message||'HTTP '+r.status)+' — ปกติถ้าเปิดจาก claude.ai (CORS)');
+    }
+    const d = await r.json();
+    return `Model: ${d.model} | stop: ${d.stop_reason}`;
+  }},
+  // 8. Fallback proxy
+  { id:'proxy', name:'🔄 Fallback Proxy (corsproxy.io)', critical:false, fn:async()=>{
+    const r = await fetch('https://corsproxy.io/?url='+encodeURIComponent('https://api.alternative.me/fng/?limit=1'), { signal:AbortSignal.timeout(8000) });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    const val = d.data?.[0]?.value;
+    if(!val) throw new Error('No data from proxy');
+    return `OK — F&G: ${val} via corsproxy.io`;
+  }},
+];
+
+async function runConnTest(){
+  const grid = document.getElementById('conn-grid');
+  const log  = document.getElementById('conn-log');
+  const badge = document.getElementById('conn-status-badge');
+  badge.textContent = 'กำลังทดสอบ...';
+  grid.innerHTML = ''; if(log) log.textContent = '';
+
+  let passed=0, failed=0;
+  const startAll = performance.now();
+
+  for(const t of CONN_TESTS){
+    const row = document.createElement('div'); row.className='conn-row';
+    row.innerHTML = `<span class="conn-name">${t.name}${t.critical?' <span style="color:var(--red);font-size:.52rem">●required</span>':''}</span><span class="conn-status"><span class="adot warn"></span>ทดสอบ...</span>`;
+    grid.appendChild(row);
+    const statusEl = row.querySelector('.conn-status');
+    const start = performance.now();
+    try{
+      const result = await Promise.race([t.fn(), new Promise((_,r)=>setTimeout(()=>r(new Error('Timeout 10s')),10000))]);
+      const lat = Math.round(performance.now()-start);
+      passed++;
+      statusEl.innerHTML = `<span class="adot ok"></span><span class="u">OK</span><span class="conn-lat">${lat}ms</span>`;
+      dot('dot-'+t.id,'ok');
+      if(log) log.textContent += `✓ ${t.name} — ${result} (${lat}ms)\n`;
+    }catch(e){
+      const lat = Math.round(performance.now()-start);
+      failed++;
+      statusEl.innerHTML = `<span class="adot err"></span><span class="d">FAIL</span><span class="conn-lat">${lat}ms</span>`;
+      dot('dot-'+t.id, t.critical?'err':'warn');
+      if(log) log.textContent += `✗ ${t.name} — ${e.message} (${lat}ms)\n`;
+    }
+  }
+
+  const total = Math.round(performance.now()-startAll);
+  document.getElementById('conn-summary').textContent = `ผ่าน ${passed}/${CONN_TESTS.length} · ${total}ms`;
+  badge.textContent = failed===0 ? 'All OK ✅' : `${passed}/${CONN_TESTS.length} passed`;
+  badge.className = 'cbadge '+(failed===0?'green':passed>=5?'gold':'red');
+  if(log) log.textContent += `\n── สรุป: ${passed}/${CONN_TESTS.length} ผ่าน (${total}ms) ──\n`;
+  if(passed>=6 && log) log.textContent += '✅ ระบบพร้อมใช้งาน\n';
+  else if(passed<3 && log) log.textContent += '❌ มีปัญหาหลายจุด — ดูส่วน "การแก้ปัญหา" ด้านล่าง\n';
+}
+
+// ============================================================
+// TABS
+// ============================================================
+function switchTab(el,name){
+  document.querySelectorAll('.tbc').forEach(e=>e.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if(el)el.classList.add('active');
+  else document.querySelector(`.tab[data-tab="${name}"]`)?.classList.add('active');
+
+  if(name==='technical'&&!window._techLoaded){window._techLoaded=true;loadTechChart('GC=F');}
+}
+
+// ============================================================
+// CLOCK
+// ============================================================
+function updateClocks(){
+  const now=new Date();
+  const th=now.toLocaleTimeString('en-US',{timeZone:'Asia/Bangkok',hour12:false});
+  const ny=now.toLocaleTimeString('en-US',{timeZone:'America/New_York',hour12:false});
+  const thEl=document.getElementById('clk-th'),nyEl=document.getElementById('clk-ny');
+  if(thEl)thEl.textContent=th;if(nyEl)nyEl.textContent=ny;
+  document.getElementById('abar-time').textContent='อัปเดต: '+now.toLocaleTimeString('th-TH');
+  renderMarketSession();
+}
+
+// ============================================================
+// REFRESH
+// ============================================================
+async function refreshAll(){
+  const btn=document.getElementById('rbtn');
+  btn.classList.add('loading');btn.textContent='↻ โหลด...';
+  Object.keys(CACHE).forEach(k=>delete CACHE[k]);
+  await Promise.allSettled([
+    loadBar(),loadDXY(),loadFG(),
+    loadList(THAI_LIST,'list-thai','฿'),
+    loadList(GLOBAL_LIST,'list-global','$'),
+    loadGold(),loadHeatmap(),
+  ]);
+  if(techSym&&window._techLoaded) loadTechChart(techSym);
+  btn.classList.remove('loading');btn.textContent='↻ รีเฟรช';
+}
+
+// ============================================================
+// INIT
+// ============================================================
+(async()=>{
+  // Load saved backend config from sessionStorage first
+  loadSavedConfig();
+  updateClocks();
+  setInterval(updateClocks,1000);
+  await Promise.allSettled([
+    loadBar(),loadDXY(),loadFG(),
+    loadList(THAI_LIST,'list-thai','฿'),
+    loadList(GLOBAL_LIST,'list-global','$'),
+    loadGold(),loadHeatmap(),
+  ]);
+  // Auto-load tech chart
+  window._techLoaded=false;
+  loadTechChart('GC=F');window._techLoaded=true;
+  setInterval(refreshAll,60000);
+  // Resize charts on window resize
+  window.addEventListener('resize',()=>{if(techSym)loadTechChart(techSym);});
+})();
+
+document.getElementById('aiq').addEventListener('keydown',e=>{if(e.key==='Enter')askAI();});
+
+// Config form — Enter key saves
+['cfg-url','cfg-key'].forEach(id=>{
+  const el=document.getElementById(id);
+  if(el){
+    el.addEventListener('keydown',e=>{if(e.key==='Enter')saveBackendConfig();});
+    el.addEventListener('focus',()=>{el.style.borderColor='var(--cyan)';});
+    el.addEventListener('blur',()=>{el.style.borderColor='var(--b1)';});
+  }
+});
+</script>
+</body>
+</html>
