@@ -13,13 +13,33 @@ const CACHE_TTL_MS  = parseInt(process.env.CACHE_TTL_MS || '60000');   // 60s
 const RATE_LIMIT    = parseInt(process.env.RATE_LIMIT   || '120');     // req/min
 const ALLOWED_ORIGIN= process.env.ALLOWED_ORIGIN || '*';
 
-// ─── YAHOO FINANCE LIBRARY ───────────────────────────────────────────────────
-// yahoo-finance2 handles all auth, cookies, crumbs internally.
-// It works from server environments (Railway, Render, VPS) without issues.
-const yf = require('yahoo-finance2').default;
+// ─── YAHOO FINANCE LIBRARY — lazy loaded ─────────────────────────────────────
+// Loaded lazily so /health responds IMMEDIATELY on container start.
+// Railway healthcheck hits /health within seconds of boot — yf must not block.
+let yf = null;
+let yfReady = false;
+let yfError = null;
 
-// Suppress non-critical validation warnings (field schema changes)
-yf.setGlobalConfig({ validation: { logErrors: false } });
+function loadYF() {
+  if (yf) return;
+  try {
+    yf = require('yahoo-finance2').default;
+    yf.setGlobalConfig({ validation: { logErrors: false } });
+    yfReady = true;
+    console.log('[yf] yahoo-finance2 loaded OK');
+  } catch (e) {
+    yfError = e.message;
+    console.error('[yf] load failed:', e.message);
+  }
+}
+
+// Load in background after server is already listening
+// This ensures /health passes before yf is ready
+function getYF() {
+  if (!yf) loadYF();
+  if (!yfReady) throw new Error('yahoo-finance2 not ready yet — retry in a moment');
+  return yf;
+}
 
 // ─── IN-MEMORY CACHE ─────────────────────────────────────────────────────────
 const cache = new Map();
@@ -84,13 +104,15 @@ function safeNum(v, digits = 4) {
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 
 // ── GET /health ───────────────────────────────────────────────────────────────
+// MUST respond instantly — no async operations here
 app.get('/health', (req, res) => {
-  res.json({
+  res.status(200).json({
     status:  'ok',
     uptime:  Math.round(process.uptime()) + 's',
     cache:   cacheStats(),
     version: '2.0.0',
     lib:     'yahoo-finance2',
+    yf:      yfReady ? 'ready' : yfError ? 'error: ' + yfError : 'loading',
     time:    new Date().toISOString(),
   });
 });
@@ -130,7 +152,7 @@ app.get('/api/quote', async (req, res) => {
   try {
     // yahoo-finance2 quoteSummary works per-symbol; batch via Promise.allSettled
     const results = await Promise.allSettled(
-      syms.map(sym => yf.quote(sym, {}, { validateResult: false }))
+      syms.map(sym => getYF().quote(sym, {}, { validateResult: false }))
     );
 
     const quotes = results.map((r, i) => {
@@ -191,7 +213,7 @@ app.get('/api/spark', async (req, res) => {
   if (hit) return res.json({ ok: true, cached: true, ...hit });
 
   try {
-    const result = await yf.chart(symbol, {
+    const result = await getYF().chart(symbol, {
       period1:  range === '1d' ? (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })() : (() => {
         const d = new Date();
         const days = { '5d':5,'1mo':30,'3mo':90,'6mo':180,'1y':365 }[range] || 30;
@@ -253,7 +275,7 @@ app.get('/api/search', async (req, res) => {
   if (hit) return res.json({ ok: true, cached: true, quotes: hit });
 
   try {
-    const result = await yf.search(q, { quotesCount: 8, newsCount: 0 }, { validateResult: false });
+    const result = await getYF().search(q, { quotesCount: 8, newsCount: 0 }, { validateResult: false });
     const quotes = (result?.quotes || []).map(r => ({
       symbol:    r.symbol,
       shortname: r.shortname || r.longname || r.symbol,
@@ -368,13 +390,20 @@ app.listen(PORT, () => {
     '╔════════════════════════════════════════╗',
     '║    TradeRadar API Server v2.0          ║',
     '╠════════════════════════════════════════╣',
-    '║  Port  : ' + String(PORT).padEnd(29)      + '║',
-    '║  Cache : ' + cacheLbl.padEnd(29)           + '║',
+    '║  Port  : ' + String(PORT).padEnd(29)           + '║',
+    '║  Cache : ' + cacheLbl.padEnd(29)               + '║',
     '║  Rate  : ' + (RATE_LIMIT+' req/min').padEnd(29) + '║',
-    '║  Lib   : yahoo-finance2               ║',
+    '║  Lib   : yahoo-finance2 (lazy)        ║',
     '║  Auth  : API Key required             ║',
     '╚════════════════════════════════════════╝',
   ].join('\n'));
+
+  // ⚡ Load yahoo-finance2 in background AFTER server is already listening.
+  // This guarantees /health responds immediately for Railway healthcheck.
+  setImmediate(() => {
+    console.log('[yf] loading yahoo-finance2...');
+    loadYF();
+  });
 });
 
 module.exports = app;
