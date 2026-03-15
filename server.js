@@ -130,7 +130,36 @@ function toFinnhubSym(sym) {
   return sym; // US stocks work directly
 }
 
-// ─── FINNHUB API ─────────────────────────────────────────────────────────────
+// ─── FINNHUB RATE LIMITER ─────────────────────────────────────────────────────
+// Free tier: 60 req/min = 1 req/sec. We throttle to be safe.
+const fhQueue   = [];
+let   fhBusy    = false;
+let   fhLastCall= 0;
+const FH_DELAY  = 200; // ms between calls (5/sec = well under 60/min limit)
+
+function fhThrottle(fn) {
+  return new Promise((resolve, reject) => {
+    fhQueue.push({fn, resolve, reject});
+    if(!fhBusy) drainFH();
+  });
+}
+
+async function drainFH() {
+  fhBusy = true;
+  while(fhQueue.length) {
+    const wait = FH_DELAY - (Date.now() - fhLastCall);
+    if(wait > 0) await new Promise(r=>setTimeout(r, wait));
+    const {fn, resolve, reject} = fhQueue.shift();
+    fhLastCall = Date.now();
+    try { resolve(await fn()); } catch(e) { reject(e); }
+  }
+  fhBusy = false;
+}
+
+async function fhGetThrottled(path) {
+  return fhThrottle(() => fhGet(path));
+}
+
 const FH = 'https://finnhub.io/api/v1';
 
 async function fhGet(path) {
@@ -144,7 +173,7 @@ async function finnhubQuote(sym) {
 
   // Crypto symbols (BINANCE:BTCUSDT format)
   if(fSym.includes(':')) {
-    const d = await fhGet(`/quote?symbol=${encodeURIComponent(fSym)}`);
+    const d = await fhGetThrottled(`/quote?symbol=${encodeURIComponent(fSym)}`);
     if(!d.c||d.c===0) throw new Error(`No price for ${fSym}`);
     const p=d.pc||d.c;
     return buildQuote(sym, sym, d.c, d.c-p, p?((d.c-p)/p)*100:0, null, null, d.h, d.l, d.o, d.h, d.l, p, null);
@@ -152,35 +181,24 @@ async function finnhubQuote(sym) {
 
   // FX rate via Finnhub forex
   if(sym==='THBX=X') {
-    const d = await fhGet('/forex/rates?base=USD');
+    const d = await fhGetThrottled('/forex/rates?base=USD');
     const rate = d?.quote?.THB;
     if(!rate) throw new Error('No THB rate from Finnhub');
     return buildQuote('THBX=X','USD/THB',rate,0,0,null,null,rate,rate,rate,rate,rate,rate,'FX');
   }
 
-  // Standard quote
-  const [quote, profile] = await Promise.allSettled([
-    fhGet(`/quote?symbol=${encodeURIComponent(fSym)}`),
-    fhGet(`/stock/profile2?symbol=${encodeURIComponent(fSym)}`),
-  ]);
-
-  const d = quote.status==='fulfilled'?quote.value:{};
-  const p2= profile.status==='fulfilled'?profile.value:{};
-
-  if(!d.c||d.c===0) throw new Error(`Finnhub: no price for ${fSym} (mapped from ${sym})`);
+  // Standard quote — single endpoint only (fast)
+  const d = await fhGetThrottled(`/quote?symbol=${encodeURIComponent(fSym)}`);
+  if(!d.c||d.c===0) throw new Error(`Finnhub: no price for ${fSym}`);
   const prev=d.pc||d.c;
 
   return buildQuote(
-    sym,
-    p2.name||fSym,
+    sym, fSym,
     d.c, d.c-prev, prev?((d.c-prev)/prev)*100:0,
     d.v||null, null,
     d.h||null, d.l||null,
     d.o||null, d.h||null, d.l||null, prev,
-    p2.finnhubIndustry||null,
-    p2.marketCapitalization?p2.marketCapitalization*1e6:null,
-    p2.currency||null,
-    p2.exchange||null,
+    null, null, null, null,
   );
 }
 
@@ -216,7 +234,7 @@ async function finnhubChart(sym, range) {
   const from = now - days*86400;
   const res  = range==='1d'?'60':'D'; // 60min for 1d, daily otherwise
 
-  const d = await fhGet(`/stock/candle?symbol=${encodeURIComponent(fSym)}&resolution=${res}&from=${from}&to=${now}`);
+  const d = await fhGetThrottled(`/stock/candle?symbol=${encodeURIComponent(fSym)}&resolution=${res}&from=${from}&to=${now}`);
   if(d.s==='no_data'||!d.t?.length) throw new Error(`Finnhub: no candle data for ${fSym}`);
 
   return {
@@ -391,7 +409,7 @@ app.get('/api/search', async(req,res)=>{
 
   if(FINNHUB_KEY && matches.length<4){
     try{
-      const d=await fhGet(`/search?q=${encodeURIComponent(q)}`);
+      const d=await fhGetThrottled(`/search?q=${encodeURIComponent(q)}`);
       const seen=new Set(matches.map(m=>m.symbol));
       (d.result||[]).slice(0,5).filter(r=>!seen.has(r.symbol)&&r.type!=='').forEach(r=>
         matches.push({symbol:r.symbol,shortname:r.description||r.symbol,type:r.type||'Stock'})
@@ -403,19 +421,50 @@ app.get('/api/search', async(req,res)=>{
 });
 
 // GET /api/fear-greed
+// alternative.me is blocked from Railway outbound — return cached or compute from VIX
 app.get('/api/fear-greed', async(req,res)=>{
   const hit=getC('fng');
   if(hit) return res.json({ok:true,cached:true,...hit});
+
+  // Try alternative.me (works sometimes depending on Railway region)
   try{
-    const d=await fetchJSON('https://api.alternative.me/fng/?limit=1&format=json',{},8000);
-    const item=d?.data?.[0]; if(!item) throw new Error('No data');
-    const p={value:parseInt(item.value),classification:item.value_classification,timestamp:item.timestamp};
-    setC('fng',p,4*3600*1000);
-    res.json({ok:true,cached:false,...p});
-  }catch(e){ res.status(502).json({error:e.message}); }
+    const d=await fetchJSON('https://api.alternative.me/fng/?limit=1&format=json',{},5000);
+    const item=d?.data?.[0];
+    if(item){
+      const p={value:parseInt(item.value),classification:item.value_classification,timestamp:item.timestamp};
+      setC('fng',p,4*3600*1000);
+      return res.json({ok:true,cached:false,...p});
+    }
+  }catch(e){
+    console.warn('[fng] alternative.me blocked/timeout:',e.message);
+  }
+
+  // Fallback: estimate from VIX via Finnhub
+  if(FINNHUB_KEY){
+    try{
+      const vd=await fhGetThrottled('/quote?symbol=VIXY'); // VIX proxy ETF
+      const vix=vd.c||20;
+      // VIX < 15 = greed, 15-20 = neutral, 20-30 = fear, >30 = extreme fear
+      const value = vix>30?Math.max(5,Math.round(40-(vix-30)*2))
+                  : vix>20?Math.round(50-(vix-20)*3)
+                  : vix>15?Math.round(65-(vix-15)*3)
+                  :        Math.min(95,Math.round(80+(15-vix)*3));
+      const classification = value<25?'Extreme Fear':value<45?'Fear':value<55?'Neutral':value<75?'Greed':'Extreme Greed';
+      const p={value,classification,timestamp:String(Math.floor(Date.now()/1000)),_note:'estimated from VIX'};
+      setC('fng',p,3600*1000); // 1h cache
+      return res.json({ok:true,cached:false,...p});
+    }catch(e2){
+      console.warn('[fng] VIX fallback failed:',e2.message);
+    }
+  }
+
+  // Last resort: return neutral
+  const p={value:50,classification:'Neutral',timestamp:String(Math.floor(Date.now()/1000)),_note:'fallback value'};
+  setC('fng',p,600*1000); // 10min cache so we retry soon
+  res.json({ok:true,cached:false,...p});
 });
 
-// GET /api/fx
+// GET /api/fx — use Finnhub forex only (Frankfurter blocked from Railway)
 app.get('/api/fx', async(req,res)=>{
   const from=(req.query.from||'USD').toUpperCase().slice(0,3);
   const to  =(req.query.to  ||'THB').toUpperCase().slice(0,3);
@@ -423,25 +472,27 @@ app.get('/api/fx', async(req,res)=>{
   const hit=getC(ck);
   if(hit) return res.json({ok:true,cached:true,from,to,...hit});
 
-  // Try Finnhub forex first, then Frankfurter
-  let rate=null, date=null;
-  if(FINNHUB_KEY){
-    try{
-      const d=await fhGet(`/forex/rates?base=${from}`);
-      if(d?.quote?.[to]){rate=d.quote[to];date=new Date().toISOString().slice(0,10);}
-    }catch{}
-  }
-  if(!rate){
-    try{
-      const d=await fetchJSON(`https://api.frankfurter.app/latest?from=${from}&to=${to}`,{},8000);
-      rate=d?.rates?.[to]; date=d?.date;
-    }catch{}
-  }
+  if(!FINNHUB_KEY) return res.status(503).json({error:'FINNHUB_KEY not set'});
 
-  if(!rate) return res.status(502).json({error:`No rate for ${from}/${to}`});
-  const p={rate,date};
-  setC(ck,p,3600*1000);
-  res.json({ok:true,cached:false,from,to,...p});
+  try{
+    const d=await fhGetThrottled(`/forex/rates?base=${from}`);
+    const rate=d?.quote?.[to];
+    if(!rate) throw new Error(`No ${from}/${to} rate in Finnhub response. Keys: ${Object.keys(d?.quote||{}).slice(0,5).join(',')}`);
+    const p={rate:+rate.toFixed(4), date:new Date().toISOString().slice(0,10), _src:'finnhub'};
+    setC(ck,p,3600*1000);
+    return res.json({ok:true,cached:false,from,to,...p});
+  }catch(e){
+    console.error('[fx]',e.message);
+    // Hard-coded fallback rates (last resort)
+    const FALLBACK={'USDTHB':33.5,'USDJPY':149.5,'EURUSD':1.08,'GBPUSD':1.27};
+    const key2=from+to;
+    const fallbackRate=FALLBACK[key2]||FALLBACK[to+''+from]?1/FALLBACK[to+''+from]:null;
+    if(fallbackRate){
+      console.warn('[fx] using hardcoded fallback for',key2);
+      return res.json({ok:true,cached:false,from,to,rate:fallbackRate,date:'fallback',_note:'Finnhub unavailable, using approximate rate'});
+    }
+    res.status(502).json({error:e.message});
+  }
 });
 
 // POST /api/ai — Claude proxy (fixes browser CORS)
