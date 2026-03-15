@@ -1,11 +1,13 @@
-// TradeRadar API Server v3.0 — ESM, Node 18+, yahoo-finance2 latest
-// "type":"module" in package.json means this file is treated as ES Module
+// TradeRadar API Server v4.0 — ESM, zero Yahoo library dependency
+// Uses Yahoo Finance v11/v8 direct HTTPS with proper headers + cookie/crumb
+// "type":"module" in package.json required
 
 import express  from 'express';
 import cors     from 'cors';
 import helmet   from 'helmet';
 import https    from 'https';
-import { createRequire } from 'module';
+import zlib     from 'zlib';
+import { Buffer } from 'buffer';
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -16,75 +18,30 @@ const CACHE_TTL_MS  = parseInt(process.env.CACHE_TTL_MS || '60000');
 const RATE_LIMIT    = parseInt(process.env.RATE_LIMIT   || '120');
 const ALLOWED_ORIGIN= process.env.ALLOWED_ORIGIN || '*';
 
-// ─── YAHOO FINANCE — dynamic ESM import ──────────────────────────────────────
-// yahoo-finance2 v2.9+ is ESM-only. On Node 22 with "type":"module", we use
-// top-level dynamic import(). The server starts listening FIRST, then yf loads.
-let yf      = null;
-let yfReady = false;
-let yfError = null;
-
-async function loadYF() {
-  try {
-    const mod = await import('yahoo-finance2');
-
-    // yahoo-finance2 v2.11.x export structure:
-    // mod = { default: { quote, chart, search, setGlobalConfig, ... } }
-    // BUT setGlobalConfig may be a separate named export or on the instance
-    const candidate = mod.default ?? mod;
-
-    // Validate core methods exist
-    if (typeof candidate.quote !== 'function') {
-      throw new Error(`yf.quote not found. Keys: ${Object.keys(candidate).slice(0,8).join(',')}`);
-    }
-
-    yf = candidate;
-
-    // setGlobalConfig is optional — skip if missing
-    if (typeof yf.setGlobalConfig === 'function') {
-      yf.setGlobalConfig({ validation: { logErrors: false } });
-    } else {
-      console.warn('[yf] setGlobalConfig not found — skipping (non-critical)');
-    }
-
-    yfReady = true;
-    console.log('[yf] yahoo-finance2 loaded OK. Methods:', Object.keys(yf).filter(k=>typeof yf[k]==='function').join(', '));
-  } catch (e) {
-    yfError = e.message;
-    console.error('[yf] load failed:', e.message);
-  }
-}
-
-function getYF() {
-  if (!yfReady) throw new Error('yahoo-finance2 not ready' + (yfError ? ': ' + yfError : ' — try again in a moment'));
-  return yf;
-}
-
 // ─── CACHE ───────────────────────────────────────────────────────────────────
 const cache = new Map();
-function getCache(k)       { const e=cache.get(k); if(!e)return null; if(Date.now()>e.exp){cache.delete(k);return null;} return e.data; }
-function setCache(k,d,ttl=CACHE_TTL_MS) { cache.set(k,{data:d,exp:Date.now()+ttl}); }
-function cacheStats()      { let v=0; const now=Date.now(); cache.forEach(e=>{if(now<e.exp)v++;}); return {total:cache.size,valid:v,ttl_ms:CACHE_TTL_MS}; }
+const getCache = k => { const e=cache.get(k); if(!e)return null; if(Date.now()>e.exp){cache.delete(k);return null;} return e.data; };
+const setCache = (k,d,ttl=CACHE_TTL_MS) => cache.set(k,{data:d,exp:Date.now()+ttl});
+const cacheStats = () => { let v=0,now=Date.now(); cache.forEach(e=>{if(now<e.exp)v++;}); return {total:cache.size,valid:v,ttl_ms:CACHE_TTL_MS}; };
 
 // ─── RATE LIMITER ─────────────────────────────────────────────────────────────
 const buckets = new Map();
-function checkRate(ip) {
+const checkRate = ip => {
   const now=Date.now(), e=buckets.get(ip)||{n:0,reset:now+60000};
   if(now>e.reset){e.n=0;e.reset=now+60000;}
   e.n++; buckets.set(ip,e); return e.n<=RATE_LIMIT;
-}
+};
 setInterval(()=>{ const now=Date.now(); buckets.forEach((v,k)=>{if(now>v.reset+60000)buckets.delete(k);}); },300000);
 
 // ─── MIDDLEWARES ──────────────────────────────────────────────────────────────
 app.use(helmet({contentSecurityPolicy:false}));
-app.use(cors({ origin: ALLOWED_ORIGIN==='*'?'*':ALLOWED_ORIGIN.split(','), methods:['GET'] }));
-
+app.use(cors({origin:ALLOWED_ORIGIN==='*'?'*':ALLOWED_ORIGIN.split(','),methods:['GET']}));
 app.use((req,res,next)=>{
   if(req.path==='/health'||req.path==='/')return next();
   const ip=(req.headers['x-forwarded-for']||'').split(',')[0].trim()||req.socket.remoteAddress;
   if(!checkRate(ip))return res.status(429).json({error:`Rate limit: max ${RATE_LIMIT} req/min`});
   next();
 });
-
 app.use((req,res,next)=>{
   if(req.path==='/health'||req.path==='/')return next();
   const key=req.headers['x-api-key']||req.query.apikey;
@@ -92,239 +49,360 @@ app.use((req,res,next)=>{
   next();
 });
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-const safeNum=(v,d=4)=>v==null||!isFinite(v)?null:+Number(v).toFixed(d);
+// ─── YAHOO FINANCE DIRECT HTTPS ──────────────────────────────────────────────
+// No library — direct HTTPS using Yahoo Finance v11 (quota/price endpoint)
+// This endpoint requires no crumb and works from server IPs.
 
-function fetchPlain(url, timeoutMs=8000) {
-  return new Promise((resolve,reject)=>{
-    const req=https.get(url,{headers:{'User-Agent':'TradeRadar/3.0','Accept':'application/json'},timeout:timeoutMs},(r)=>{
-      let body=''; r.setEncoding('utf8'); r.on('data',c=>body+=c);
-      r.on('end',()=>{ try{resolve(JSON.parse(body));}catch(e){reject(e);} });
+const UA_LIST = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+];
+let uaIdx = 0;
+const nextUA = () => UA_LIST[uaIdx++ % UA_LIST.length];
+
+// Yahoo Finance cookie/crumb state
+let yfCookie = '';
+let yfCrumb  = '';
+let crumbAt  = 0;
+const CRUMB_TTL = 50 * 60 * 1000; // 50 min
+
+async function yfGet(path) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'query1.finance.yahoo.com',
+      path,
+      method: 'GET',
+      headers: {
+        'User-Agent': nextUA(),
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Encoding': 'gzip, br',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Origin': 'https://finance.yahoo.com',
+        'Referer': 'https://finance.yahoo.com/',
+        ...(yfCookie && { 'Cookie': yfCookie }),
+      },
+      timeout: 12000,
+    };
+    const req = https.request(options, res => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`HTTP ${res.statusCode}`));
+      }
+      const enc = (res.headers['content-encoding'] || '').toLowerCase();
+      let stream = res;
+      if (enc === 'gzip')       { const g = zlib.createGunzip();           res.pipe(g); stream = g; }
+      else if (enc === 'br')    { const b = zlib.createBrotliDecompress(); res.pipe(b); stream = b; }
+      else if (enc === 'deflate'){const d = zlib.createInflate();          res.pipe(d); stream = d; }
+
+      const chunks = [];
+      stream.on('data', c => chunks.push(Buffer.from(c)));
+      stream.on('end', () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+        catch(e) { reject(new Error('Invalid JSON')); }
+      });
+      stream.on('error', reject);
     });
-    req.on('error',reject);
-    req.on('timeout',()=>{req.destroy();reject(new Error('timeout'));});
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
+    req.end();
+  });
+}
+
+async function refreshCrumb() {
+  if (yfCrumb && Date.now() - crumbAt < CRUMB_TTL) return;
+  try {
+    // Step 1: get cookie
+    const cookie = await new Promise((resolve, reject) => {
+      const r = https.get('https://finance.yahoo.com/', {
+        headers: { 'User-Agent': nextUA(), 'Accept': 'text/html' },
+        timeout: 8000,
+      }, res => {
+        res.resume();
+        const raw = res.headers['set-cookie'] || [];
+        resolve(raw.map(c => c.split(';')[0]).join('; '));
+      });
+      r.on('error', reject);
+      r.on('timeout', () => { r.destroy(); reject(new Error('cookie timeout')); });
+    });
+    if (cookie) yfCookie = cookie;
+
+    // Step 2: get crumb
+    const crumb = await new Promise((resolve, reject) => {
+      const r = https.get('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+        headers: {
+          'User-Agent': nextUA(),
+          'Cookie': yfCookie,
+          'Accept': 'text/plain',
+        },
+        timeout: 8000,
+      }, res => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', c => body += c);
+        res.on('end', () => resolve(body.trim()));
+      });
+      r.on('error', reject);
+      r.on('timeout', () => { r.destroy(); reject(new Error('crumb timeout')); });
+    });
+
+    if (crumb && !crumb.includes('<') && crumb.length < 20) {
+      yfCrumb = crumb;
+      crumbAt = Date.now();
+      console.log('[crumb] refreshed OK:', crumb.slice(0,6)+'...');
+    }
+  } catch(e) {
+    console.warn('[crumb] failed (non-fatal):', e.message);
+  }
+}
+
+const safeNum = (v, d=4) => v == null || !isFinite(v) ? null : +Number(v).toFixed(d);
+
+// ── Yahoo v11 quote (works without crumb) ─────────────────────────────────────
+async function fetchQuoteV11(symbols) {
+  const syms = symbols.join(',');
+  // v11/finance/quoteSummary or financialData — but easiest is v8/finance/quote
+  // which uses a different auth path than v7
+  const crumbParam = yfCrumb ? `&crumb=${encodeURIComponent(yfCrumb)}` : '';
+  const path = `/v8/finance/quote?symbols=${encodeURIComponent(syms)}&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume,averageVolume,fiftyTwoWeekHigh,fiftyTwoWeekLow,fiftyDayAverage,twoHundredDayAverage,shortName,trailingPE,forwardPE,marketCap,regularMarketPreviousClose,regularMarketOpen,regularMarketDayHigh,regularMarketDayLow,dividendYield${crumbParam}`;
+  const data = await yfGet(path);
+  return data?.quoteResponse?.result || [];
+}
+
+// ── Yahoo v8 chart (for spark/intraday) ──────────────────────────────────────
+async function fetchChart(symbol, range, interval) {
+  const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&includePrePost=false`;
+  return yfGet(path);
+}
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+function rawQuoteToClean(q, sym) {
+  return {
+    symbol:                     q.symbol     || sym,
+    shortName:                  q.shortName  || q.longName || sym,
+    regularMarketPrice:         safeNum(q.regularMarketPrice, 4),
+    regularMarketChange:        safeNum(q.regularMarketChange, 4),
+    regularMarketChangePercent: safeNum(q.regularMarketChangePercent, 4),
+    regularMarketVolume:        q.regularMarketVolume   ?? null,
+    averageVolume:              q.averageVolume ?? null,
+    fiftyTwoWeekHigh:           safeNum(q.fiftyTwoWeekHigh, 4),
+    fiftyTwoWeekLow:            safeNum(q.fiftyTwoWeekLow, 4),
+    fiftyDayAverage:            safeNum(q.fiftyDayAverage, 4),
+    twoHundredDayAverage:       safeNum(q.twoHundredDayAverage, 4),
+    trailingPE:                 safeNum(q.trailingPE, 2),
+    forwardPE:                  safeNum(q.forwardPE, 2),
+    marketCap:                  q.marketCap ?? null,
+    dividendYield:              safeNum(q.dividendYield, 6),
+    regularMarketOpen:          safeNum(q.regularMarketOpen, 4),
+    regularMarketDayHigh:       safeNum(q.regularMarketDayHigh, 4),
+    regularMarketDayLow:        safeNum(q.regularMarketDayLow, 4),
+    regularMarketPreviousClose: safeNum(q.regularMarketPreviousClose, 4),
+    currency:                   q.currency ?? null,
+    exchangeName:               q.fullExchangeName || q.exchange || null,
+  };
+}
+
+async function simpleGet(url) {
+  return new Promise((resolve, reject) => {
+    const r = https.get(url, {
+      headers: { 'User-Agent': 'TradeRadar/4.0', 'Accept': 'application/json' },
+      timeout: 8000,
+    }, res => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', c => body += c);
+      res.on('end', () => { try { resolve(JSON.parse(body)); } catch(e) { reject(e); } });
+    });
+    r.on('error', reject);
+    r.on('timeout', () => { r.destroy(); reject(new Error('timeout')); });
   });
 }
 
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 
-// GET /health — synchronous, no yf dependency, responds in <1ms
-app.get('/health',(req,res)=>{
+app.get('/health', (req, res) => {
   res.status(200).json({
-    status:'ok', uptime:Math.round(process.uptime())+'s',
-    cache:cacheStats(), version:'3.0.0',
-    yf: yfReady?'ready': yfError?'error: '+yfError:'loading',
-    time:new Date().toISOString(),
+    status: 'ok',
+    uptime: Math.round(process.uptime()) + 's',
+    cache: cacheStats(),
+    version: '4.0.0',
+    crumb: yfCrumb ? 'ok' : 'pending',
+    time: new Date().toISOString(),
   });
 });
 
-// GET /
-app.get('/',(req,res)=>{
+app.get('/', (req, res) => {
   res.json({
-    name:'TradeRadar API v3', version:'3.0.0',
-    runtime:`Node ${process.version}`, type:'ESM',
-    auth:'X-API-Key header on all /api/* endpoints',
-    endpoints:{
-      '/health':                        'Server health (no auth)',
-      '/api/quote?symbols=AAPL,GC=F':  'Quotes (max 20 symbols)',
-      '/api/spark?symbol=AAPL':        'Intraday chart (range: 1d 5d 1mo | interval: 1m 5m 15m 60m)',
-      '/api/search?q=apple':           'Symbol search',
-      '/api/fear-greed':               'Crypto Fear & Greed Index',
-      '/api/fx?from=USD&to=THB':       'Exchange rate',
-      '/api/cache/clear':              'Clear cache',
+    name: 'TradeRadar API v4', version: '4.0.0',
+    note: 'Zero library — direct Yahoo Finance HTTPS',
+    endpoints: {
+      '/health': 'Server health (no auth)',
+      '/api/quote?symbols=AAPL,GC=F': 'Quotes (max 20)',
+      '/api/spark?symbol=AAPL': 'Intraday chart (range: 1d 5d 1mo | interval: 5m 15m 60m)',
+      '/api/search?q=apple': 'Symbol search',
+      '/api/fear-greed': 'Fear & Greed',
+      '/api/fx?from=USD&to=THB': 'FX rate',
+      '/api/cache/clear': 'Clear cache',
     },
   });
 });
 
 // GET /api/quote
-app.get('/api/quote', async(req,res)=>{
-  const raw=req.query.symbols||req.query.symbol||'';
-  if(!raw)return res.status(400).json({error:'symbols param required. Example: ?symbols=AAPL,PTT.BK,GC=F'});
-  const syms=raw.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
-  if(syms.length>20)return res.status(400).json({error:'Max 20 symbols'});
+app.get('/api/quote', async (req, res) => {
+  const raw = req.query.symbols || req.query.symbol || '';
+  if (!raw) return res.status(400).json({ error: 'symbols param required' });
+  const syms = raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  if (syms.length > 20) return res.status(400).json({ error: 'Max 20 symbols' });
 
-  const cacheKey='quote:'+syms.join(',');
-  const hit=getCache(cacheKey);
-  if(hit)return res.json({ok:true,cached:true,count:hit.length,quotes:hit,timestamp:new Date().toISOString()});
+  const cacheKey = 'quote:' + syms.join(',');
+  const hit = getCache(cacheKey);
+  if (hit) return res.json({ ok: true, cached: true, count: hit.length, quotes: hit, timestamp: new Date().toISOString() });
 
   try {
-    const yfInst=getYF();
-    const results=await Promise.allSettled(syms.map(s=>yfInst.quote(s,{},{validateResult:false})));
-    const quotes=results.map((r,i)=>{
-      if(r.status==='rejected')return null;
-      const q=r.value||{};
-      return {
-        symbol:                     q.symbol||syms[i],
-        shortName:                  q.shortName||q.longName||syms[i],
-        regularMarketPrice:         safeNum(q.regularMarketPrice,4),
-        regularMarketChange:        safeNum(q.regularMarketChange,4),
-        regularMarketChangePercent: safeNum(q.regularMarketChangePercent,4),
-        regularMarketVolume:        q.regularMarketVolume??null,
-        averageVolume:              q.averageDailyVolume10Day??q.averageVolume??null,
-        fiftyTwoWeekHigh:           safeNum(q.fiftyTwoWeekHigh,4),
-        fiftyTwoWeekLow:            safeNum(q.fiftyTwoWeekLow,4),
-        fiftyDayAverage:            safeNum(q.fiftyDayAverage,4),
-        twoHundredDayAverage:       safeNum(q.twoHundredDayAverage,4),
-        trailingPE:                 safeNum(q.trailingPE,2),
-        forwardPE:                  safeNum(q.forwardPE,2),
-        marketCap:                  q.marketCap??null,
-        dividendYield:              safeNum(q.dividendYield,6),
-        regularMarketOpen:          safeNum(q.regularMarketOpen,4),
-        regularMarketDayHigh:       safeNum(q.regularMarketDayHigh,4),
-        regularMarketDayLow:        safeNum(q.regularMarketDayLow,4),
-        regularMarketPreviousClose: safeNum(q.regularMarketPreviousClose,4),
-        currency:                   q.currency||null,
-        exchangeName:               q.fullExchangeName||q.exchange||null,
-      };
-    }).filter(q=>q&&q.regularMarketPrice!=null);
-
-    if(quotes.length===0){
-      return res.status(502).json({error:'No valid quotes returned — symbols may be invalid or Yahoo Finance is unavailable'});
-    }
-    setCache(cacheKey,quotes);
-    res.json({ok:true,cached:false,count:quotes.length,quotes,timestamp:new Date().toISOString()});
+    await refreshCrumb();
+    const raw = await fetchQuoteV11(syms);
+    if (!raw.length) return res.status(502).json({ error: 'No quotes returned from Yahoo Finance' });
+    const quotes = raw.map(q => rawQuoteToClean(q, q.symbol)).filter(q => q.regularMarketPrice != null);
+    setCache(cacheKey, quotes);
+    res.json({ ok: true, cached: false, count: quotes.length, quotes, timestamp: new Date().toISOString() });
   } catch(e) {
-    console.error('[quote]',e.message);
-    res.status(503).json({error:e.message});
+    console.error('[quote]', e.message);
+    res.status(502).json({ error: e.message });
   }
 });
 
 // GET /api/spark
-app.get('/api/spark', async(req,res)=>{
-  const symbol=(req.query.symbol||'').trim().toUpperCase();
-  if(!symbol)return res.status(400).json({error:'symbol param required'});
+app.get('/api/spark', async (req, res) => {
+  const symbol = (req.query.symbol || '').trim().toUpperCase();
+  if (!symbol) return res.status(400).json({ error: 'symbol param required' });
+  const RANGES    = ['1d','5d','1mo','3mo'];
+  const INTERVALS = ['1m','2m','5m','15m','30m','60m','1d'];
+  const range    = RANGES.includes(req.query.range)    ? req.query.range    : '1d';
+  const interval = INTERVALS.includes(req.query.interval) ? req.query.interval : '5m';
 
-  const RANGES=['1d','5d','1mo','3mo','6mo','1y'];
-  const INTERVALS=['1m','2m','5m','15m','30m','60m','90m','1h','1d','1wk'];
-  const range   =RANGES.includes(req.query.range)?req.query.range:'1d';
-  const interval=INTERVALS.includes(req.query.interval)?req.query.interval:'5m';
-
-  const cacheKey=`spark:${symbol}:${range}:${interval}`;
-  const hit=getCache(cacheKey);
-  if(hit)return res.json({ok:true,cached:true,...hit});
+  const cacheKey = `spark:${symbol}:${range}:${interval}`;
+  const hit = getCache(cacheKey);
+  if (hit) return res.json({ ok: true, cached: true, ...hit });
 
   try {
-    const yfInst=getYF();
-    const now=new Date();
-    let period1=new Date(now);
-    if(range==='1d'){period1.setHours(0,0,0,0);}
-    else{const d={'5d':5,'1mo':30,'3mo':90,'6mo':180,'1y':365}[range]||30;period1.setDate(now.getDate()-d);}
+    const data = await fetchChart(symbol, range, interval);
+    const result = data?.chart?.result?.[0];
+    if (!result) return res.status(404).json({ error: `No chart data for ${symbol}` });
 
-    const result=await yfInst.chart(symbol,{period1,interval,includePrePost:false},{validateResult:false});
-    const qs=result?.quotes||[];
-    if(qs.length===0)return res.status(404).json({error:`No chart data for ${symbol}`});
+    const ts = result.timestamp || [];
+    const q  = result.indicators?.quote?.[0] || {};
+    const m  = result.meta || {};
 
-    const payload={
-      symbol,range,interval,
-      currency: result?.meta?.currency,
-      exchange: result?.meta?.exchangeName,
-      meta:{
-        regularMarketPrice: safeNum(result?.meta?.regularMarketPrice,4),
-        previousClose:      safeNum(result?.meta?.chartPreviousClose||result?.meta?.previousClose,4),
+    const payload = {
+      symbol, range, interval,
+      currency: m.currency,
+      exchange: m.exchangeName,
+      meta: {
+        regularMarketPrice: safeNum(m.regularMarketPrice, 4),
+        previousClose: safeNum(m.chartPreviousClose || m.previousClose, 4),
       },
-      timestamps: qs.map(q=>Math.floor(new Date(q.date).getTime()/1000)),
-      closes:     qs.map(q=>safeNum(q.close,4)),
-      opens:      qs.map(q=>safeNum(q.open,4)),
-      highs:      qs.map(q=>safeNum(q.high,4)),
-      lows:       qs.map(q=>safeNum(q.low,4)),
-      volumes:    qs.map(q=>q.volume??null),
-      count:      qs.length,
+      timestamps: ts,
+      closes:  (q.close  || []).map(v => safeNum(v, 4)),
+      opens:   (q.open   || []).map(v => safeNum(v, 4)),
+      highs:   (q.high   || []).map(v => safeNum(v, 4)),
+      lows:    (q.low    || []).map(v => safeNum(v, 4)),
+      volumes: (q.volume || []).map(v => v ?? null),
+      count: ts.length,
     };
-    setCache(cacheKey,payload);
-    res.json({ok:true,cached:false,...payload});
+    setCache(cacheKey, payload);
+    res.json({ ok: true, cached: false, ...payload });
   } catch(e) {
-    console.error('[spark]',symbol,e.message);
-    res.status(502).json({error:e.message});
+    console.error('[spark]', symbol, e.message);
+    res.status(502).json({ error: e.message });
   }
 });
 
 // GET /api/search
-app.get('/api/search', async(req,res)=>{
-  const q=(req.query.q||'').trim();
-  if(!q)return res.status(400).json({error:'q param required'});
+app.get('/api/search', async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q) return res.status(400).json({ error: 'q param required' });
 
-  const cacheKey='search:'+q.toLowerCase();
-  const hit=getCache(cacheKey);
-  if(hit)return res.json({ok:true,cached:true,quotes:hit});
+  const cacheKey = 'search:' + q.toLowerCase();
+  const hit = getCache(cacheKey);
+  if (hit) return res.json({ ok: true, cached: true, quotes: hit });
 
   try {
-    const result=await getYF().search(q,{quotesCount:8,newsCount:0},{validateResult:false});
-    const quotes=(result?.quotes||[]).map(r=>({
+    const crumbParam = yfCrumb ? `&crumb=${encodeURIComponent(yfCrumb)}` : '';
+    const data = await yfGet(`/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=8&newsCount=0${crumbParam}`);
+    const quotes = (data?.quotes || []).map(r => ({
       symbol:    r.symbol,
-      shortname: r.shortname||r.longname||r.symbol,
-      type:      r.typeDisp||r.quoteType||'—',
-      exchange:  r.exchDisp||r.exchange||'—',
+      shortname: r.shortname || r.longname || r.symbol,
+      type:      r.typeDisp  || r.quoteType || '—',
+      exchange:  r.exchDisp  || r.exchange  || '—',
     }));
-    setCache(cacheKey,quotes,300000);
-    res.json({ok:true,cached:false,quotes});
+    setCache(cacheKey, quotes, 300000);
+    res.json({ ok: true, cached: false, quotes });
   } catch(e) {
-    console.error('[search]',e.message);
-    res.status(502).json({error:e.message});
+    console.error('[search]', e.message);
+    res.status(502).json({ error: e.message });
   }
 });
 
-// GET /api/fear-greed — direct HTTPS, no yf needed
-app.get('/api/fear-greed', async(req,res)=>{
-  const hit=getCache('fng');
-  if(hit)return res.json({ok:true,cached:true,...hit});
+// GET /api/fear-greed
+app.get('/api/fear-greed', async (req, res) => {
+  const hit = getCache('fng');
+  if (hit) return res.json({ ok: true, cached: true, ...hit });
   try {
-    const data=await fetchPlain('https://api.alternative.me/fng/?limit=1&format=json');
-    const item=data?.data?.[0];
-    if(!item)throw new Error('Unexpected response');
-    const payload={value:parseInt(item.value),classification:item.value_classification,timestamp:item.timestamp};
-    setCache('fng',payload,4*60*60*1000);
-    res.json({ok:true,cached:false,...payload});
+    const data = await simpleGet('https://api.alternative.me/fng/?limit=1&format=json');
+    const item = data?.data?.[0];
+    if (!item) throw new Error('No data');
+    const payload = { value: parseInt(item.value), classification: item.value_classification, timestamp: item.timestamp };
+    setCache('fng', payload, 4 * 60 * 60 * 1000);
+    res.json({ ok: true, cached: false, ...payload });
   } catch(e) {
-    res.status(502).json({error:e.message});
+    res.status(502).json({ error: e.message });
   }
 });
 
-// GET /api/fx — direct HTTPS, no yf needed
-app.get('/api/fx', async(req,res)=>{
-  const from=(req.query.from||'USD').toUpperCase().slice(0,3);
-  const to  =(req.query.to  ||'THB').toUpperCase().slice(0,3);
-  const cacheKey=`fx:${from}:${to}`;
-  const hit=getCache(cacheKey);
-  if(hit)return res.json({ok:true,cached:true,from,to,...hit});
+// GET /api/fx
+app.get('/api/fx', async (req, res) => {
+  const from = (req.query.from || 'USD').toUpperCase().slice(0,3);
+  const to   = (req.query.to   || 'THB').toUpperCase().slice(0,3);
+  const cacheKey = `fx:${from}:${to}`;
+  const hit = getCache(cacheKey);
+  if (hit) return res.json({ ok: true, cached: true, from, to, ...hit });
   try {
-    const data=await fetchPlain(`https://api.frankfurter.app/latest?from=${from}&to=${to}`);
-    const rate=data?.rates?.[to];
-    if(!rate)throw new Error(`No rate for ${from}/${to}`);
-    const payload={rate,date:data.date};
-    setCache(cacheKey,payload,60*60*1000);
-    res.json({ok:true,cached:false,from,to,...payload});
+    const data = await simpleGet(`https://api.frankfurter.app/latest?from=${from}&to=${to}`);
+    const rate = data?.rates?.[to];
+    if (!rate) throw new Error(`No rate for ${from}/${to}`);
+    const payload = { rate, date: data.date };
+    setCache(cacheKey, payload, 60 * 60 * 1000);
+    res.json({ ok: true, cached: false, from, to, ...payload });
   } catch(e) {
-    res.status(502).json({error:e.message});
+    res.status(502).json({ error: e.message });
   }
 });
 
 // GET /api/cache/clear
-app.get('/api/cache/clear',(req,res)=>{
-  const n=cache.size; cache.clear();
-  res.json({ok:true,cleared:n});
+app.get('/api/cache/clear', (req, res) => {
+  const n = cache.size; cache.clear();
+  res.json({ ok: true, cleared: n });
 });
 
-// 404 / error
-app.use((req,res)=>res.status(404).json({error:'Not found. See GET / for docs.'}));
-app.use((err,req,res,_next)=>{ console.error('[ERROR]',err.message); res.status(500).json({error:'Internal error'}); });
+app.use((req,res) => res.status(404).json({ error: 'Not found. See GET / for docs.' }));
+app.use((err,req,res,_next) => { console.error('[ERROR]', err.message); res.status(500).json({ error: 'Internal error' }); });
 
 // ─── START ────────────────────────────────────────────────────────────────────
-app.listen(PORT, async () => {
-  const cacheLbl=CACHE_TTL_MS<60000?(CACHE_TTL_MS/1000+' sec'):(CACHE_TTL_MS/60000+' min');
+app.listen(PORT, () => {
+  const cacheLbl = CACHE_TTL_MS < 60000 ? (CACHE_TTL_MS/1000+'s') : (CACHE_TTL_MS/60000+'m');
   console.log([
     '╔════════════════════════════════════════╗',
-    '║    TradeRadar API Server v3.0 (ESM)    ║',
+    '║    TradeRadar API Server v4.0 (ESM)    ║',
     '╠════════════════════════════════════════╣',
-    '║  Port  : '+String(PORT).padEnd(29)           +'║',
-    '║  Cache : '+cacheLbl.padEnd(29)               +'║',
-    '║  Rate  : '+(RATE_LIMIT+' req/min').padEnd(29)+'║',
-    '║  Node  : '+process.version.padEnd(29)        +'║',
-    '║  Auth  : API Key required             ║',
+    '║  Port  : '+String(PORT).padEnd(29)            +'║',
+    '║  Cache : '+cacheLbl.padEnd(29)                +'║',
+    '║  Rate  : '+(RATE_LIMIT+' req/min').padEnd(29) +'║',
+    '║  Node  : '+process.version.padEnd(29)         +'║',
+    '║  Lib   : built-in https (no ext lib)  ║',
     '╚════════════════════════════════════════╝',
   ].join('\n'));
 
-  // Load yahoo-finance2 via dynamic ESM import AFTER server is listening
-  // This guarantees /health passes Railway healthcheck immediately
-  console.log('[yf] loading yahoo-finance2...');
-  await loadYF();
+  // Warm up crumb in background — does NOT block healthcheck
+  refreshCrumb().catch(() => {});
 });
