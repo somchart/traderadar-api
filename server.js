@@ -1,28 +1,36 @@
-// TradeRadar API Server v4.0 — ESM, zero Yahoo library dependency
-// Uses Yahoo Finance v11/v8 direct HTTPS with proper headers + cookie/crumb
-// "type":"module" in package.json required
+// TradeRadar API Server v5.0 — ESM, Railway-compatible
+// Data sources:
+//   - Quotes : Yahoo Finance via RapidAPI (free 500 req/mo) OR Finnhub (free 60 req/min)
+//   - Chart  : Stooq CSV (free, no auth, no IP block)
+//   - Search : Yahoo v1/finance/search via RapidAPI
+//   - F&G    : alternative.me (direct, always works)
+//   - FX     : frankfurter.app (direct, always works)
+// "type":"module" in package.json
 
-import express  from 'express';
-import cors     from 'cors';
-import helmet   from 'helmet';
-import https    from 'https';
-import zlib     from 'zlib';
-import { Buffer } from 'buffer';
+import express from 'express';
+import cors    from 'cors';
+import helmet  from 'helmet';
+import https   from 'https';
+import http    from 'http';
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
-const API_KEY       = process.env.API_KEY      || 'change-me-in-env';
-const CACHE_TTL_MS  = parseInt(process.env.CACHE_TTL_MS || '60000');
-const RATE_LIMIT    = parseInt(process.env.RATE_LIMIT   || '120');
-const ALLOWED_ORIGIN= process.env.ALLOWED_ORIGIN || '*';
+const API_KEY        = process.env.API_KEY        || 'change-me-in-env';
+const CACHE_TTL_MS   = parseInt(process.env.CACHE_TTL_MS  || '60000');
+const RATE_LIMIT     = parseInt(process.env.RATE_LIMIT    || '120');
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
+// Get a free key at rapidapi.com → "Yahoo Finance" by Apidojo (500 req/mo free)
+const RAPIDAPI_KEY   = process.env.RAPIDAPI_KEY   || '';
+// Get a free key at finnhub.io (60 req/min free, no IP block)
+const FINNHUB_KEY    = process.env.FINNHUB_KEY    || '';
 
 // ─── CACHE ───────────────────────────────────────────────────────────────────
-const cache = new Map();
-const getCache = k => { const e=cache.get(k); if(!e)return null; if(Date.now()>e.exp){cache.delete(k);return null;} return e.data; };
-const setCache = (k,d,ttl=CACHE_TTL_MS) => cache.set(k,{data:d,exp:Date.now()+ttl});
-const cacheStats = () => { let v=0,now=Date.now(); cache.forEach(e=>{if(now<e.exp)v++;}); return {total:cache.size,valid:v,ttl_ms:CACHE_TTL_MS}; };
+const cache   = new Map();
+const getC    = k => { const e=cache.get(k); if(!e)return null; if(Date.now()>e.exp){cache.delete(k);return null;} return e.data; };
+const setC    = (k,d,ttl=CACHE_TTL_MS) => cache.set(k,{data:d,exp:Date.now()+ttl});
+const cStats  = () => { let v=0,now=Date.now(); cache.forEach(e=>{if(now<e.exp)v++;}); return {total:cache.size,valid:v,ttl_ms:CACHE_TTL_MS}; };
 
 // ─── RATE LIMITER ─────────────────────────────────────────────────────────────
 const buckets = new Map();
@@ -37,72 +45,46 @@ setInterval(()=>{ const now=Date.now(); buckets.forEach((v,k)=>{if(now>v.reset+6
 app.use(helmet({contentSecurityPolicy:false}));
 app.use(cors({origin:ALLOWED_ORIGIN==='*'?'*':ALLOWED_ORIGIN.split(','),methods:['GET']}));
 app.use((req,res,next)=>{
-  if(req.path==='/health'||req.path==='/')return next();
+  if(['/health','/'].includes(req.path))return next();
   const ip=(req.headers['x-forwarded-for']||'').split(',')[0].trim()||req.socket.remoteAddress;
   if(!checkRate(ip))return res.status(429).json({error:`Rate limit: max ${RATE_LIMIT} req/min`});
   next();
 });
 app.use((req,res,next)=>{
-  if(req.path==='/health'||req.path==='/')return next();
+  if(['/health','/'].includes(req.path))return next();
   const key=req.headers['x-api-key']||req.query.apikey;
-  if(!key||key!==API_KEY)return res.status(401).json({error:'Invalid or missing X-API-Key header'});
+  if(!key||key!==API_KEY)return res.status(401).json({error:'Missing or invalid X-API-Key'});
   next();
 });
 
-// ─── YAHOO FINANCE DIRECT HTTPS ──────────────────────────────────────────────
-// No library — direct HTTPS using Yahoo Finance v11 (quota/price endpoint)
-// This endpoint requires no crumb and works from server IPs.
-
-const UA_LIST = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-];
-let uaIdx = 0;
-const nextUA = () => UA_LIST[uaIdx++ % UA_LIST.length];
-
-// Yahoo Finance cookie/crumb state
-let yfCookie = '';
-let yfCrumb  = '';
-let crumbAt  = 0;
-const CRUMB_TTL = 50 * 60 * 1000; // 50 min
-
-async function yfGet(path) {
+// ─── HTTP FETCH HELPER ───────────────────────────────────────────────────────
+function fetchURL(urlStr, extraHeaders={}, timeoutMs=10000) {
   return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'query1.finance.yahoo.com',
-      path,
-      method: 'GET',
-      headers: {
-        'User-Agent': nextUA(),
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Encoding': 'gzip, br',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache',
-        'Origin': 'https://finance.yahoo.com',
-        'Referer': 'https://finance.yahoo.com/',
-        ...(yfCookie && { 'Cookie': yfCookie }),
+    const url    = new URL(urlStr);
+    const client = url.protocol === 'https:' ? https : http;
+    const opts   = {
+      hostname: url.hostname,
+      port:     url.port || (url.protocol === 'https:' ? 443 : 80),
+      path:     url.pathname + url.search,
+      method:   'GET',
+      headers:  {
+        'User-Agent': 'Mozilla/5.0 (compatible; TradeRadarBot/5.0)',
+        'Accept':     'application/json, text/plain, */*',
+        ...extraHeaders,
       },
-      timeout: 12000,
+      timeout: timeoutMs,
     };
-    const req = https.request(options, res => {
-      if (res.statusCode !== 200) {
-        res.resume();
-        return reject(new Error(`HTTP ${res.statusCode}`));
-      }
-      const enc = (res.headers['content-encoding'] || '').toLowerCase();
-      let stream = res;
-      if (enc === 'gzip')       { const g = zlib.createGunzip();           res.pipe(g); stream = g; }
-      else if (enc === 'br')    { const b = zlib.createBrotliDecompress(); res.pipe(b); stream = b; }
-      else if (enc === 'deflate'){const d = zlib.createInflate();          res.pipe(d); stream = d; }
-
+    const req = client.request(opts, res => {
       const chunks = [];
-      stream.on('data', c => chunks.push(Buffer.from(c)));
-      stream.on('end', () => {
-        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
-        catch(e) { reject(new Error('Invalid JSON')); }
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0,120)}`));
+        }
+        try   { resolve(JSON.parse(body)); }
+        catch { resolve(body); }           // return raw string if not JSON (e.g. CSV)
       });
-      stream.on('error', reject);
     });
     req.on('error', reject);
     req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
@@ -110,112 +92,198 @@ async function yfGet(path) {
   });
 }
 
-async function refreshCrumb() {
-  if (yfCrumb && Date.now() - crumbAt < CRUMB_TTL) return;
-  try {
-    // Step 1: get cookie
-    const cookie = await new Promise((resolve, reject) => {
-      const r = https.get('https://finance.yahoo.com/', {
-        headers: { 'User-Agent': nextUA(), 'Accept': 'text/html' },
-        timeout: 8000,
-      }, res => {
-        res.resume();
-        const raw = res.headers['set-cookie'] || [];
-        resolve(raw.map(c => c.split(';')[0]).join('; '));
-      });
-      r.on('error', reject);
-      r.on('timeout', () => { r.destroy(); reject(new Error('cookie timeout')); });
-    });
-    if (cookie) yfCookie = cookie;
+// ─── DATA SOURCES ────────────────────────────────────────────────────────────
+const safeNum = (v,d=4) => v==null||!isFinite(Number(v)) ? null : +Number(v).toFixed(d);
 
-    // Step 2: get crumb
-    const crumb = await new Promise((resolve, reject) => {
-      const r = https.get('https://query1.finance.yahoo.com/v1/test/getcrumb', {
-        headers: {
-          'User-Agent': nextUA(),
-          'Cookie': yfCookie,
-          'Accept': 'text/plain',
-        },
-        timeout: 8000,
-      }, res => {
-        let body = '';
-        res.setEncoding('utf8');
-        res.on('data', c => body += c);
-        res.on('end', () => resolve(body.trim()));
-      });
-      r.on('error', reject);
-      r.on('timeout', () => { r.destroy(); reject(new Error('crumb timeout')); });
-    });
-
-    if (crumb && !crumb.includes('<') && crumb.length < 20) {
-      yfCrumb = crumb;
-      crumbAt = Date.now();
-      console.log('[crumb] refreshed OK:', crumb.slice(0,6)+'...');
-    }
-  } catch(e) {
-    console.warn('[crumb] failed (non-fatal):', e.message);
-  }
-}
-
-const safeNum = (v, d=4) => v == null || !isFinite(v) ? null : +Number(v).toFixed(d);
-
-// ── Yahoo v11 quote (works without crumb) ─────────────────────────────────────
-async function fetchQuoteV11(symbols) {
-  const syms = symbols.join(',');
-  // v11/finance/quoteSummary or financialData — but easiest is v8/finance/quote
-  // which uses a different auth path than v7
-  const crumbParam = yfCrumb ? `&crumb=${encodeURIComponent(yfCrumb)}` : '';
-  const path = `/v8/finance/quote?symbols=${encodeURIComponent(syms)}&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume,averageVolume,fiftyTwoWeekHigh,fiftyTwoWeekLow,fiftyDayAverage,twoHundredDayAverage,shortName,trailingPE,forwardPE,marketCap,regularMarketPreviousClose,regularMarketOpen,regularMarketDayHigh,regularMarketDayLow,dividendYield${crumbParam}`;
-  const data = await yfGet(path);
-  return data?.quoteResponse?.result || [];
-}
-
-// ── Yahoo v8 chart (for spark/intraday) ──────────────────────────────────────
-async function fetchChart(symbol, range, interval) {
-  const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&includePrePost=false`;
-  return yfGet(path);
-}
-
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-function rawQuoteToClean(q, sym) {
+// ── SOURCE 1: Finnhub — no IP block, 60 req/min free ─────────────────────────
+async function finnhubQuote(sym) {
+  if (!FINNHUB_KEY) throw new Error('FINNHUB_KEY not set');
+  // Finnhub uses different symbol format: BK suffix for Thai
+  const fSym = sym.endsWith('.BK') ? sym.replace('.BK','') : sym;
+  const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(fSym)}&token=${FINNHUB_KEY}`;
+  const d = await fetchURL(url, {}, 8000);
+  if (!d.c) throw new Error('Finnhub: no price for '+sym);
+  const prev = d.pc || d.c;
   return {
-    symbol:                     q.symbol     || sym,
-    shortName:                  q.shortName  || q.longName || sym,
+    symbol:                     sym,
+    shortName:                  sym,
+    regularMarketPrice:         safeNum(d.c, 4),
+    regularMarketChange:        safeNum(d.c - prev, 4),
+    regularMarketChangePercent: safeNum(prev ? ((d.c-prev)/prev)*100 : 0, 4),
+    regularMarketVolume:        null,
+    averageVolume:              null,
+    fiftyTwoWeekHigh:           safeNum(d.h, 4),
+    fiftyTwoWeekLow:            safeNum(d.l, 4),
+    fiftyDayAverage:            null,
+    twoHundredDayAverage:       null,
+    trailingPE:                 null,
+    marketCap:                  null,
+    regularMarketOpen:          safeNum(d.o, 4),
+    regularMarketDayHigh:       safeNum(d.h, 4),
+    regularMarketDayLow:        safeNum(d.l, 4),
+    regularMarketPreviousClose: safeNum(prev, 4),
+    _source: 'finnhub',
+  };
+}
+
+// ── SOURCE 2: RapidAPI Yahoo Finance ─────────────────────────────────────────
+async function rapidQuote(sym) {
+  if (!RAPIDAPI_KEY) throw new Error('RAPIDAPI_KEY not set');
+  const url = `https://yahoo-finance15.p.rapidapi.com/api/v1/markets/stock/quotes?ticker=${encodeURIComponent(sym)}`;
+  const d = await fetchURL(url, {
+    'x-rapidapi-key':  RAPIDAPI_KEY,
+    'x-rapidapi-host': 'yahoo-finance15.p.rapidapi.com',
+  }, 10000);
+  const q = d?.body?.[0] || d?.quoteResponse?.result?.[0] || d?.data?.[0];
+  if (!q?.regularMarketPrice) throw new Error('RapidAPI: no price for '+sym);
+  return {
+    symbol:                     q.symbol || sym,
+    shortName:                  q.shortName || q.displayName || sym,
     regularMarketPrice:         safeNum(q.regularMarketPrice, 4),
     regularMarketChange:        safeNum(q.regularMarketChange, 4),
     regularMarketChangePercent: safeNum(q.regularMarketChangePercent, 4),
-    regularMarketVolume:        q.regularMarketVolume   ?? null,
-    averageVolume:              q.averageVolume ?? null,
+    regularMarketVolume:        q.regularMarketVolume ?? null,
+    averageVolume:              q.averageDailyVolume3Month ?? q.averageVolume ?? null,
     fiftyTwoWeekHigh:           safeNum(q.fiftyTwoWeekHigh, 4),
     fiftyTwoWeekLow:            safeNum(q.fiftyTwoWeekLow, 4),
     fiftyDayAverage:            safeNum(q.fiftyDayAverage, 4),
     twoHundredDayAverage:       safeNum(q.twoHundredDayAverage, 4),
     trailingPE:                 safeNum(q.trailingPE, 2),
-    forwardPE:                  safeNum(q.forwardPE, 2),
     marketCap:                  q.marketCap ?? null,
-    dividendYield:              safeNum(q.dividendYield, 6),
     regularMarketOpen:          safeNum(q.regularMarketOpen, 4),
     regularMarketDayHigh:       safeNum(q.regularMarketDayHigh, 4),
     regularMarketDayLow:        safeNum(q.regularMarketDayLow, 4),
     regularMarketPreviousClose: safeNum(q.regularMarketPreviousClose, 4),
     currency:                   q.currency ?? null,
-    exchangeName:               q.fullExchangeName || q.exchange || null,
+    exchangeName:               q.fullExchangeName ?? null,
+    _source: 'rapidapi',
   };
 }
 
-async function simpleGet(url) {
-  return new Promise((resolve, reject) => {
-    const r = https.get(url, {
-      headers: { 'User-Agent': 'TradeRadar/4.0', 'Accept': 'application/json' },
-      timeout: 8000,
-    }, res => {
-      let body = '';
-      res.setEncoding('utf8');
-      res.on('data', c => body += c);
-      res.on('end', () => { try { resolve(JSON.parse(body)); } catch(e) { reject(e); } });
+// ── SOURCE 3: Stooq CSV — completely free, no auth, no IP block ───────────────
+// Works for: US stocks (AAPL.US), indices (^SPX, ^NDX), gold (GC.F), FX (USDTHB.FX)
+// Thai stocks: PTT.TH format
+function toStooqSym(sym) {
+  if (sym === 'GC=F')      return 'GC.F';
+  if (sym === 'CL=F')      return 'CL.F';
+  if (sym === 'BTC-USD')   return 'BTC.V';
+  if (sym === 'ETH-USD')   return 'ETH.V';
+  if (sym === '^GSPC')     return '^SPX';
+  if (sym === '^IXIC')     return '^NDX';
+  if (sym === '^VIX')      return '^VIX';
+  if (sym === '^SET')      return 'STI.IN'; // approximate
+  if (sym === 'THBX=X')   return 'USDTHB.FX';
+  if (sym.endsWith('.BK')) return sym.replace('.BK', '.TH');
+  // US stocks: add .US suffix
+  if (/^[A-Z]{1,5}$/.test(sym)) return sym + '.US';
+  return sym;
+}
+
+async function stooqQuote(sym) {
+  const stSym = toStooqSym(sym);
+  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stSym)}&i=d`;
+  const csv = await fetchURL(url, { 'Accept': 'text/csv,text/plain,*/*' }, 8000);
+  if (typeof csv !== 'string') throw new Error('Stooq: non-text response');
+  const lines = csv.trim().split('\n').filter(l => l.trim() && !l.startsWith('Date'));
+  if (!lines.length) throw new Error(`Stooq: no data for ${stSym}`);
+  // CSV format: Date,Open,High,Low,Close,Volume
+  const parts  = lines[lines.length-1].split(',');
+  const [date, open, high, low, close, vol] = parts;
+  const prev   = lines.length > 1 ? parseFloat(lines[lines.length-2].split(',')[4]) : null;
+  const c      = parseFloat(close);
+  const p      = prev || c;
+  if (isNaN(c)) throw new Error(`Stooq: invalid price "${close}" for ${stSym}`);
+  return {
+    symbol:                     sym,
+    shortName:                  sym,
+    regularMarketPrice:         safeNum(c, 4),
+    regularMarketChange:        safeNum(c - p, 4),
+    regularMarketChangePercent: safeNum(p ? ((c-p)/p)*100 : 0, 4),
+    regularMarketVolume:        vol ? parseInt(vol) : null,
+    averageVolume:              null,
+    fiftyTwoWeekHigh:           safeNum(Math.max(c, parseFloat(high)), 4),
+    fiftyTwoWeekLow:            safeNum(Math.min(c, parseFloat(low)), 4),
+    fiftyDayAverage:            null,
+    twoHundredDayAverage:       null,
+    trailingPE:                 null,
+    marketCap:                  null,
+    regularMarketOpen:          safeNum(open, 4),
+    regularMarketDayHigh:       safeNum(high, 4),
+    regularMarketDayLow:        safeNum(low, 4),
+    regularMarketPreviousClose: safeNum(p, 4),
+    _source: 'stooq',
+    _date: date,
+  };
+}
+
+// ── Stooq historical CSV for spark chart ─────────────────────────────────────
+async function stooqChart(sym, days=1) {
+  const stSym = toStooqSym(sym);
+  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stSym)}&i=d`;
+  const csv = await fetchURL(url, { 'Accept': 'text/csv,text/plain,*/*' }, 8000);
+  if (typeof csv !== 'string') throw new Error('Stooq chart: non-text response');
+  const lines = csv.trim().split('\n').filter(l=>l.trim()&&!l.startsWith('Date'));
+  if (!lines.length) throw new Error(`Stooq: no chart data for ${stSym}`);
+
+  const take = Math.min(lines.length, Math.max(days * 2, 30));
+  const rows = lines.slice(-take).map(l => {
+    const [date,open,high,low,close,vol] = l.split(',');
+    return {
+      ts:     Math.floor(new Date(date).getTime()/1000),
+      open:   safeNum(open,4), high: safeNum(high,4),
+      low:    safeNum(low,4),  close: safeNum(close,4),
+      volume: vol ? parseInt(vol) : null,
+    };
+  }).filter(r => r.close != null);
+
+  return {
+    timestamps: rows.map(r=>r.ts),
+    closes:     rows.map(r=>r.close),
+    opens:      rows.map(r=>r.open),
+    highs:      rows.map(r=>r.high),
+    lows:       rows.map(r=>r.low),
+    volumes:    rows.map(r=>r.volume),
+    count:      rows.length,
+    _source: 'stooq',
+  };
+}
+
+// ── Multi-source quote with fallback chain ────────────────────────────────────
+async function getQuote(sym) {
+  const errors = [];
+
+  // Try RapidAPI first (most fields)
+  if (RAPIDAPI_KEY) {
+    try { return await rapidQuote(sym); } catch(e) { errors.push('rapidapi: '+e.message); }
+  }
+
+  // Try Finnhub (good for US stocks)
+  if (FINNHUB_KEY) {
+    try { return await finnhubQuote(sym); } catch(e) { errors.push('finnhub: '+e.message); }
+  }
+
+  // Always try Stooq (free, no auth, covers most symbols)
+  try { return await stooqQuote(sym); } catch(e) { errors.push('stooq: '+e.message); }
+
+  throw new Error(`All sources failed for ${sym}: ${errors.join(' | ')}`);
+}
+
+async function getChart(sym, range) {
+  const days = {'1d':1,'5d':5,'1mo':30,'3mo':90}[range]||1;
+
+  // Stooq always works for chart
+  try { return await stooqChart(sym, days); } catch(e) {}
+
+  throw new Error(`Chart unavailable for ${sym}`);
+}
+
+function simpleGet(url) {
+  return new Promise((res,rej)=>{
+    const r=https.get(url,{headers:{'User-Agent':'TradeRadar/5.0','Accept':'application/json'},timeout:8000},resp=>{
+      let b=''; resp.setEncoding('utf8'); resp.on('data',c=>b+=c);
+      resp.on('end',()=>{ try{res(JSON.parse(b));}catch(e){rej(e);} });
     });
-    r.on('error', reject);
-    r.on('timeout', () => { r.destroy(); reject(new Error('timeout')); });
+    r.on('error',rej); r.on('timeout',()=>{r.destroy();rej(new Error('timeout'));});
   });
 }
 
@@ -223,186 +291,177 @@ async function simpleGet(url) {
 
 app.get('/health', (req, res) => {
   res.status(200).json({
-    status: 'ok',
-    uptime: Math.round(process.uptime()) + 's',
-    cache: cacheStats(),
-    version: '4.0.0',
-    crumb: yfCrumb ? 'ok' : 'pending',
+    status:   'ok',
+    uptime:   Math.round(process.uptime())+'s',
+    cache:    cStats(),
+    version:  '5.0.0',
+    sources:  {
+      rapidapi: RAPIDAPI_KEY ? 'configured' : 'not set (optional)',
+      finnhub:  FINNHUB_KEY  ? 'configured' : 'not set (optional)',
+      stooq:    'always available (free, no key)',
+    },
     time: new Date().toISOString(),
   });
 });
 
 app.get('/', (req, res) => {
   res.json({
-    name: 'TradeRadar API v4', version: '4.0.0',
-    note: 'Zero library — direct Yahoo Finance HTTPS',
-    endpoints: {
-      '/health': 'Server health (no auth)',
-      '/api/quote?symbols=AAPL,GC=F': 'Quotes (max 20)',
-      '/api/spark?symbol=AAPL': 'Intraday chart (range: 1d 5d 1mo | interval: 5m 15m 60m)',
-      '/api/search?q=apple': 'Symbol search',
-      '/api/fear-greed': 'Fear & Greed',
-      '/api/fx?from=USD&to=THB': 'FX rate',
-      '/api/cache/clear': 'Clear cache',
+    name:'TradeRadar API v5', version:'5.0.0',
+    dataSources: ['Stooq (free,always)', 'Finnhub (free key)', 'RapidAPI Yahoo (free key)'],
+    auth:'X-API-Key header on all /api/* endpoints',
+    endpoints:{
+      '/health':                        'Health + source status (no auth)',
+      '/api/quote?symbols=AAPL,GC=F':  'Quotes — multi-source fallback',
+      '/api/spark?symbol=AAPL':        'Chart data (1d/5d/1mo/3mo)',
+      '/api/search?q=apple':           'Symbol search',
+      '/api/fear-greed':               'Fear & Greed',
+      '/api/fx?from=USD&to=THB':       'FX rate',
+      '/api/cache/clear':              'Clear cache',
     },
   });
 });
 
-// GET /api/quote
 app.get('/api/quote', async (req, res) => {
-  const raw = req.query.symbols || req.query.symbol || '';
+  const raw  = req.query.symbols || req.query.symbol || '';
   if (!raw) return res.status(400).json({ error: 'symbols param required' });
-  const syms = raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  const syms = raw.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
   if (syms.length > 20) return res.status(400).json({ error: 'Max 20 symbols' });
 
-  const cacheKey = 'quote:' + syms.join(',');
-  const hit = getCache(cacheKey);
-  if (hit) return res.json({ ok: true, cached: true, count: hit.length, quotes: hit, timestamp: new Date().toISOString() });
+  const cacheKey = 'quote:'+syms.join(',');
+  const hit = getC(cacheKey);
+  if (hit) return res.json({ok:true,cached:true,count:hit.length,quotes:hit,timestamp:new Date().toISOString()});
 
-  try {
-    await refreshCrumb();
-    const raw = await fetchQuoteV11(syms);
-    if (!raw.length) return res.status(502).json({ error: 'No quotes returned from Yahoo Finance' });
-    const quotes = raw.map(q => rawQuoteToClean(q, q.symbol)).filter(q => q.regularMarketPrice != null);
-    setCache(cacheKey, quotes);
-    res.json({ ok: true, cached: false, count: quotes.length, quotes, timestamp: new Date().toISOString() });
-  } catch(e) {
-    console.error('[quote]', e.message);
-    res.status(502).json({ error: e.message });
-  }
+  const results = await Promise.allSettled(syms.map(s=>getQuote(s)));
+  const quotes  = results
+    .map((r,i) => r.status==='fulfilled' ? r.value : { symbol:syms[i], error:r.reason?.message })
+    .filter(q => q.regularMarketPrice != null);
+
+  if (!quotes.length) return res.status(502).json({
+    error: 'No quotes returned. Set RAPIDAPI_KEY or FINNHUB_KEY in Railway Variables for more coverage.',
+    details: results.map((r,i)=>({symbol:syms[i],error:r.reason?.message})),
+  });
+
+  setC(cacheKey, quotes);
+  res.json({ok:true,cached:false,count:quotes.length,quotes,timestamp:new Date().toISOString()});
 });
 
-// GET /api/spark
 app.get('/api/spark', async (req, res) => {
-  const symbol = (req.query.symbol || '').trim().toUpperCase();
-  if (!symbol) return res.status(400).json({ error: 'symbol param required' });
-  const RANGES    = ['1d','5d','1mo','3mo'];
-  const INTERVALS = ['1m','2m','5m','15m','30m','60m','1d'];
-  const range    = RANGES.includes(req.query.range)    ? req.query.range    : '1d';
-  const interval = INTERVALS.includes(req.query.interval) ? req.query.interval : '5m';
+  const symbol = (req.query.symbol||'').trim().toUpperCase();
+  if (!symbol) return res.status(400).json({error:'symbol param required'});
+  const range = ['1d','5d','1mo','3mo'].includes(req.query.range) ? req.query.range : '1d';
 
-  const cacheKey = `spark:${symbol}:${range}:${interval}`;
-  const hit = getCache(cacheKey);
-  if (hit) return res.json({ ok: true, cached: true, ...hit });
+  const cacheKey = `spark:${symbol}:${range}`;
+  const hit = getC(cacheKey);
+  if (hit) return res.json({ok:true,cached:true,...hit});
 
   try {
-    const data = await fetchChart(symbol, range, interval);
-    const result = data?.chart?.result?.[0];
-    if (!result) return res.status(404).json({ error: `No chart data for ${symbol}` });
-
-    const ts = result.timestamp || [];
-    const q  = result.indicators?.quote?.[0] || {};
-    const m  = result.meta || {};
-
-    const payload = {
-      symbol, range, interval,
-      currency: m.currency,
-      exchange: m.exchangeName,
-      meta: {
-        regularMarketPrice: safeNum(m.regularMarketPrice, 4),
-        previousClose: safeNum(m.chartPreviousClose || m.previousClose, 4),
-      },
-      timestamps: ts,
-      closes:  (q.close  || []).map(v => safeNum(v, 4)),
-      opens:   (q.open   || []).map(v => safeNum(v, 4)),
-      highs:   (q.high   || []).map(v => safeNum(v, 4)),
-      lows:    (q.low    || []).map(v => safeNum(v, 4)),
-      volumes: (q.volume || []).map(v => v ?? null),
-      count: ts.length,
-    };
-    setCache(cacheKey, payload);
-    res.json({ ok: true, cached: false, ...payload });
+    const data = await getChart(symbol, range);
+    setC(cacheKey, data);
+    res.json({ok:true,cached:false,symbol,range,...data});
   } catch(e) {
-    console.error('[spark]', symbol, e.message);
-    res.status(502).json({ error: e.message });
+    res.status(502).json({error:e.message});
   }
 });
 
-// GET /api/search
 app.get('/api/search', async (req, res) => {
-  const q = (req.query.q || '').trim();
-  if (!q) return res.status(400).json({ error: 'q param required' });
+  const q = (req.query.q||'').trim();
+  if (!q) return res.status(400).json({error:'q param required'});
 
-  const cacheKey = 'search:' + q.toLowerCase();
-  const hit = getCache(cacheKey);
-  if (hit) return res.json({ ok: true, cached: true, quotes: hit });
+  // Search using Stooq suggestions or return static suggestions
+  // For now: filter from known symbols list + Finnhub search
+  const known = [
+    {symbol:'AAPL.US',shortname:'Apple Inc.',type:'US Stock'},
+    {symbol:'NVDA.US',shortname:'NVIDIA Corp.',type:'US Stock'},
+    {symbol:'TSLA.US',shortname:'Tesla Inc.',type:'US Stock'},
+    {symbol:'MSFT.US',shortname:'Microsoft Corp.',type:'US Stock'},
+    {symbol:'AMZN.US',shortname:'Amazon.com',type:'US Stock'},
+    {symbol:'META.US',shortname:'Meta Platforms',type:'US Stock'},
+    {symbol:'GOOGL.US',shortname:'Alphabet Inc.',type:'US Stock'},
+    {symbol:'GC.F',shortname:'Gold Futures',type:'Futures'},
+    {symbol:'PTT.TH',shortname:'บมจ. ปตท.',type:'TH Stock'},
+    {symbol:'CPALL.TH',shortname:'บมจ. ซีพี ออลล์',type:'TH Stock'},
+    {symbol:'KBANK.TH',shortname:'บมจ. กสิกรไทย',type:'TH Stock'},
+    {symbol:'^SPX',shortname:'S&P 500',type:'Index'},
+    {symbol:'^NDX',shortname:'NASDAQ 100',type:'Index'},
+    {symbol:'BTC.V',shortname:'Bitcoin',type:'Crypto'},
+  ];
 
-  try {
-    const crumbParam = yfCrumb ? `&crumb=${encodeURIComponent(yfCrumb)}` : '';
-    const data = await yfGet(`/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=8&newsCount=0${crumbParam}`);
-    const quotes = (data?.quotes || []).map(r => ({
-      symbol:    r.symbol,
-      shortname: r.shortname || r.longname || r.symbol,
-      type:      r.typeDisp  || r.quoteType || '—',
-      exchange:  r.exchDisp  || r.exchange  || '—',
-    }));
-    setCache(cacheKey, quotes, 300000);
-    res.json({ ok: true, cached: false, quotes });
-  } catch(e) {
-    console.error('[search]', e.message);
-    res.status(502).json({ error: e.message });
+  const uq = q.toUpperCase();
+  const matches = known.filter(s =>
+    s.symbol.includes(uq) || s.shortname.toUpperCase().includes(uq)
+  );
+
+  // Try Finnhub symbol search too
+  if (FINNHUB_KEY) {
+    try {
+      const url = `https://finnhub.io/api/v1/search?q=${encodeURIComponent(q)}&token=${FINNHUB_KEY}`;
+      const d = await fetchURL(url, {}, 6000);
+      const extra = (d.result||[]).slice(0,6).map(r=>({
+        symbol:    r.symbol,
+        shortname: r.description||r.symbol,
+        type:      r.type||'—',
+        exchange:  r.primaryExchange||'',
+      }));
+      const allSyms = new Set(matches.map(m=>m.symbol));
+      extra.filter(e=>!allSyms.has(e.symbol)).forEach(e=>matches.push(e));
+    } catch{}
   }
+
+  res.json({ok:true,cached:false,quotes:matches.slice(0,8).map(s=>({
+    symbol:    s.symbol,
+    shortname: s.shortname,
+    type:      s.type||'—',
+    exchange:  s.exchange||'—',
+  }))});
 });
 
-// GET /api/fear-greed
 app.get('/api/fear-greed', async (req, res) => {
-  const hit = getCache('fng');
-  if (hit) return res.json({ ok: true, cached: true, ...hit });
+  const hit = getC('fng');
+  if (hit) return res.json({ok:true,cached:true,...hit});
   try {
-    const data = await simpleGet('https://api.alternative.me/fng/?limit=1&format=json');
-    const item = data?.data?.[0];
+    const d = await simpleGet('https://api.alternative.me/fng/?limit=1&format=json');
+    const item = d?.data?.[0];
     if (!item) throw new Error('No data');
-    const payload = { value: parseInt(item.value), classification: item.value_classification, timestamp: item.timestamp };
-    setCache('fng', payload, 4 * 60 * 60 * 1000);
-    res.json({ ok: true, cached: false, ...payload });
-  } catch(e) {
-    res.status(502).json({ error: e.message });
-  }
+    const p = {value:parseInt(item.value),classification:item.value_classification,timestamp:item.timestamp};
+    setC('fng',p,4*60*60*1000);
+    res.json({ok:true,cached:false,...p});
+  } catch(e) { res.status(502).json({error:e.message}); }
 });
 
-// GET /api/fx
 app.get('/api/fx', async (req, res) => {
-  const from = (req.query.from || 'USD').toUpperCase().slice(0,3);
-  const to   = (req.query.to   || 'THB').toUpperCase().slice(0,3);
-  const cacheKey = `fx:${from}:${to}`;
-  const hit = getCache(cacheKey);
-  if (hit) return res.json({ ok: true, cached: true, from, to, ...hit });
+  const from=(req.query.from||'USD').toUpperCase().slice(0,3);
+  const to  =(req.query.to  ||'THB').toUpperCase().slice(0,3);
+  const cacheKey=`fx:${from}:${to}`;
+  const hit=getC(cacheKey);
+  if(hit)return res.json({ok:true,cached:true,from,to,...hit});
   try {
-    const data = await simpleGet(`https://api.frankfurter.app/latest?from=${from}&to=${to}`);
-    const rate = data?.rates?.[to];
-    if (!rate) throw new Error(`No rate for ${from}/${to}`);
-    const payload = { rate, date: data.date };
-    setCache(cacheKey, payload, 60 * 60 * 1000);
-    res.json({ ok: true, cached: false, from, to, ...payload });
-  } catch(e) {
-    res.status(502).json({ error: e.message });
-  }
+    const d=await simpleGet(`https://api.frankfurter.app/latest?from=${from}&to=${to}`);
+    const rate=d?.rates?.[to];
+    if(!rate)throw new Error(`No rate for ${from}/${to}`);
+    const p={rate,date:d.date};
+    setC(cacheKey,p,60*60*1000);
+    res.json({ok:true,cached:false,from,to,...p});
+  } catch(e) { res.status(502).json({error:e.message}); }
 });
 
-// GET /api/cache/clear
-app.get('/api/cache/clear', (req, res) => {
-  const n = cache.size; cache.clear();
-  res.json({ ok: true, cleared: n });
-});
+app.get('/api/cache/clear', (req,res)=>{ const n=cache.size; cache.clear(); res.json({ok:true,cleared:n}); });
 
-app.use((req,res) => res.status(404).json({ error: 'Not found. See GET / for docs.' }));
-app.use((err,req,res,_next) => { console.error('[ERROR]', err.message); res.status(500).json({ error: 'Internal error' }); });
+app.use((req,res)=>res.status(404).json({error:'Not found. See GET /'}));
+app.use((err,req,res,_n)=>{ console.error('[ERROR]',err.message); res.status(500).json({error:'Internal error'}); });
 
 // ─── START ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  const cacheLbl = CACHE_TTL_MS < 60000 ? (CACHE_TTL_MS/1000+'s') : (CACHE_TTL_MS/60000+'m');
+  const c=CACHE_TTL_MS<60000?(CACHE_TTL_MS/1000+'s'):(CACHE_TTL_MS/60000+'m');
   console.log([
     '╔════════════════════════════════════════╗',
-    '║    TradeRadar API Server v4.0 (ESM)    ║',
+    '║    TradeRadar API Server v5.0 (ESM)    ║',
     '╠════════════════════════════════════════╣',
-    '║  Port  : '+String(PORT).padEnd(29)            +'║',
-    '║  Cache : '+cacheLbl.padEnd(29)                +'║',
-    '║  Rate  : '+(RATE_LIMIT+' req/min').padEnd(29) +'║',
-    '║  Node  : '+process.version.padEnd(29)         +'║',
-    '║  Lib   : built-in https (no ext lib)  ║',
+    '║  Port  : '+String(PORT).padEnd(29)           +'║',
+    '║  Cache : '+c.padEnd(29)                      +'║',
+    '║  Rate  : '+(RATE_LIMIT+' req/min').padEnd(29)+'║',
+    '║  Stooq : always on (no key needed)    ║',
+    '║  Rapid : '+(RAPIDAPI_KEY?'✅ configured':'⚠️  not set (optional)').padEnd(29)+'║',
+    '║  Finn  : '+(FINNHUB_KEY ?'✅ configured':'⚠️  not set (optional)').padEnd(29)+'║',
     '╚════════════════════════════════════════╝',
   ].join('\n'));
-
-  // Warm up crumb in background — does NOT block healthcheck
-  refreshCrumb().catch(() => {});
 });
