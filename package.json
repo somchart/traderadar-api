@@ -1,7 +1,7 @@
 {
   "name": "traderadar-api",
-  "version": "4.0.0",
-  "description": "TradeRadar backend — zero Yahoo library, direct HTTPS",
+  "version": "7.0.0",
+  "description": "TradeRadar backend — Finnhub primary, manual CORS",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -13,7 +13,6 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "cors":    "^2.8.5",
     "express": "^4.18.2",
     "helmet":  "^7.1.0"
   },

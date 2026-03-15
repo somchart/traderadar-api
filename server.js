@@ -4,7 +4,6 @@
 // "type":"module" in package.json required
 
 import express from 'express';
-import cors    from 'cors';
 import helmet  from 'helmet';
 import https   from 'https';
 import http    from 'http';
@@ -38,16 +37,38 @@ setInterval(()=>{ const now=Date.now(); buckets.forEach((v,k)=>{if(now>v.reset+6
 
 // ─── MIDDLEWARES ──────────────────────────────────────────────────────────────
 app.use(helmet({contentSecurityPolicy:false}));
-app.use(cors({origin:ALLOWED_ORIGIN==='*'?'*':ALLOWED_ORIGIN.split(','),methods:['GET','POST']}));
+
+// ── CORS — must come FIRST, before any auth or rate limiting ──
+// Custom CORS to allow X-API-Key header in preflight (OPTIONS)
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '*';
+  const allowed = ALLOWED_ORIGIN === '*' || ALLOWED_ORIGIN.split(',').map(s=>s.trim()).includes(origin);
+
+  if(allowed || ALLOWED_ORIGIN === '*') {
+    res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN === '*' ? '*' : origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400'); // cache preflight 24h
+
+  // Respond immediately to preflight — no auth, no rate limit
+  if(req.method === 'OPTIONS') return res.status(204).end();
+  next();
+});
+
 app.use(express.json({limit:'8kb'}));
+
+// ── Rate limiter — skip OPTIONS and health ──
 app.use((req,res,next)=>{
-  if(['/health','/'].includes(req.path)) return next();
+  if(req.method==='OPTIONS'||['/health','/'].includes(req.path)) return next();
   const ip=(req.headers['x-forwarded-for']||'').split(',')[0].trim()||req.socket.remoteAddress;
   if(!checkRate(ip)) return res.status(429).json({error:`Rate limit: max ${RATE_LIMIT} req/min`});
   next();
 });
+
+// ── API Key auth — skip OPTIONS and health ──
 app.use((req,res,next)=>{
-  if(['/health','/'].includes(req.path)) return next();
+  if(req.method==='OPTIONS'||['/health','/'].includes(req.path)) return next();
   const key=req.headers['x-api-key']||req.query.apikey;
   if(!key||key!==API_KEY) return res.status(401).json({error:'Invalid or missing X-API-Key'});
   next();
