@@ -26,10 +26,28 @@ let yfError = null;
 async function loadYF() {
   try {
     const mod = await import('yahoo-finance2');
-    yf = mod.default;
-    yf.setGlobalConfig({ validation: { logErrors: false } });
+
+    // yahoo-finance2 v2.11.x export structure:
+    // mod = { default: { quote, chart, search, setGlobalConfig, ... } }
+    // BUT setGlobalConfig may be a separate named export or on the instance
+    const candidate = mod.default ?? mod;
+
+    // Validate core methods exist
+    if (typeof candidate.quote !== 'function') {
+      throw new Error(`yf.quote not found. Keys: ${Object.keys(candidate).slice(0,8).join(',')}`);
+    }
+
+    yf = candidate;
+
+    // setGlobalConfig is optional — skip if missing
+    if (typeof yf.setGlobalConfig === 'function') {
+      yf.setGlobalConfig({ validation: { logErrors: false } });
+    } else {
+      console.warn('[yf] setGlobalConfig not found — skipping (non-critical)');
+    }
+
     yfReady = true;
-    console.log('[yf] yahoo-finance2 loaded OK');
+    console.log('[yf] yahoo-finance2 loaded OK. Methods:', Object.keys(yf).filter(k=>typeof yf[k]==='function').join(', '));
   } catch (e) {
     yfError = e.message;
     console.error('[yf] load failed:', e.message);
