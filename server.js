@@ -14,32 +14,46 @@ const RATE_LIMIT    = parseInt(process.env.RATE_LIMIT   || '120');     // req/mi
 const ALLOWED_ORIGIN= process.env.ALLOWED_ORIGIN || '*';
 
 // ─── YAHOO FINANCE LIBRARY — lazy loaded ─────────────────────────────────────
+// yahoo-finance2@2.8.0 = last CommonJS-compatible version (pinned in package.json).
 // Loaded lazily so /health responds IMMEDIATELY on container start.
 // Railway healthcheck hits /health within seconds of boot — yf must not block.
-let yf = null;
-let yfReady = false;
-let yfError = null;
+let yf       = null;
+let yfReady  = false;
+let yfError  = null;
 
 function loadYF() {
-  if (yf) return;
+  if (yfReady) return;
   try {
-    yf = require('yahoo-finance2').default;
+    // v2.8.0 CommonJS: handle both module shapes
+    const mod = require('yahoo-finance2');
+    yf = (mod && mod.default && typeof mod.default.quote === 'function')
+      ? mod.default
+      : mod;
+    if (typeof yf.quote !== 'function') {
+      throw new Error('yf.quote not found — check yahoo-finance2 version');
+    }
     yf.setGlobalConfig({ validation: { logErrors: false } });
     yfReady = true;
-    console.log('[yf] yahoo-finance2 loaded OK');
+    yfError = null;
+    console.log('[yf] yahoo-finance2@2.8.0 loaded OK');
   } catch (e) {
+    yf      = null;
+    yfReady = false;
     yfError = e.message;
     console.error('[yf] load failed:', e.message);
   }
 }
 
-// Load in background after server is already listening
-// This ensures /health passes before yf is ready
 function getYF() {
-  if (!yf) loadYF();
-  if (!yfReady) throw new Error('yahoo-finance2 not ready yet — retry in a moment');
+  if (!yfReady) {
+    loadYF();
+    if (!yfReady) {
+      throw new Error('yahoo-finance2 unavailable: ' + (yfError || 'still loading'));
+    }
+  }
   return yf;
 }
+
 
 // ─── IN-MEMORY CACHE ─────────────────────────────────────────────────────────
 const cache = new Map();

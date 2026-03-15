@@ -1,7 +1,7 @@
 {
   "name": "traderadar-api",
   "version": "2.0.0",
-  "description": "TradeRadar backend — Yahoo Finance via yahoo-finance2, no CORS issues on Railway",
+  "description": "TradeRadar backend — Yahoo Finance proxy with caching and auth",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -12,10 +12,10 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "cors":            "^2.8.5",
-    "express":         "^4.18.2",
-    "helmet":          "^7.1.0",
-    "yahoo-finance2":  "^2.11.3"
+    "cors":           "^2.8.5",
+    "express":        "^4.18.2",
+    "helmet":         "^7.1.0",
+    "yahoo-finance2": "2.8.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
